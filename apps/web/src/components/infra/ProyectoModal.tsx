@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { supabase } from '@/lib/supabase'
+import { createClient } from '@/utils/supabase/client' // Cliente estandarizado
 import { Button } from '@/components/ui/button'
 
 interface ProyectoModalProps {
@@ -22,67 +22,74 @@ export default function ProyectoModal({ proyecto, isOpen, onClose, onSuccess, su
     estado: 'activo'
   })
 
+  const supabase = createClient()
+
+  // Sincronizar datos cuando el modal se abre o cambia el proyecto seleccionado
   useEffect(() => {
-    if (proyecto) {
-      setFormData({
-        nombre: proyecto.nombre || '',
-        entidad: proyecto.entidad || '',
-        region: proyecto.region || '',
-        supervisor_id: proyecto.supervisor_id || '',
-        estado: proyecto.estado || 'activo'
-      })
-    } else {
-      setFormData({ nombre: '', entidad: '', region: '', supervisor_id: '', estado: 'activo' })
+    if (isOpen) {
+      if (proyecto) {
+        setFormData({
+          nombre: proyecto.nombre || '',
+          entidad: proyecto.entidad || '',
+          region: proyecto.region || '',
+          supervisor_id: proyecto.supervisor_id || '',
+          estado: proyecto.estado || 'activo'
+        })
+      } else {
+        setFormData({ nombre: '', entidad: '', region: '', supervisor_id: '', estado: 'activo' })
+      }
     }
   }, [proyecto, isOpen])
 
   if (!isOpen) return null
 
   const handleSubmit = async (e: React.FormEvent) => {
-  e.preventDefault()
-  console.log("1. Iniciando envío..."); // Diagnóstico
-  setLoading(true)
+    e.preventDefault()
+    setLoading(true)
 
-  try {
-    const dataToSave = {
-      nombre: formData.nombre,
-      entidad: formData.entidad || null,
-      region: formData.region || null,
-      supervisor_id: formData.supervisor_id === "" ? null : formData.supervisor_id,
-      estado: formData.estado
+    try {
+      const dataToSave = {
+        nombre: formData.nombre,
+        entidad: formData.entidad || null,
+        region: formData.region || null,
+        supervisor_id: formData.supervisor_id === "" ? null : formData.supervisor_id,
+        estado: formData.estado
+      }
+
+      const isEditing = !!proyecto?.id
+      
+      let error;
+
+      if (isEditing) {
+        const { error: updateError } = await supabase
+          .from('proyectos')
+          .update(dataToSave)
+          .eq('id', proyecto.id)
+        error = updateError
+      } else {
+        const { error: insertError } = await supabase
+          .from('proyectos')
+          .insert([dataToSave])
+        error = insertError
+      }
+
+      if (error) {
+        alert("Error al guardar: " + error.message)
+      } else {
+        onSuccess() // Esto llamará a router.refresh() en el padre
+        onClose()
+      }
+    } catch (err) {
+      console.error("Error inesperado:", err)
+      alert("Ocurrió un error inesperado.")
+    } finally {
+      setLoading(false)
     }
-
-    console.log("2. Datos a enviar:", dataToSave); // Diagnóstico
-
-    const isEditing = !!proyecto?.id
-    
-    // Ejecutamos la petición
-    const response = isEditing 
-      ? await supabase.from('proyectos').update(dataToSave).eq('id', proyecto.id)
-      : await supabase.from('proyectos').insert([dataToSave])
-
-    console.log("3. Respuesta de Supabase:", response); // Diagnóstico
-
-    if (response.error) {
-      console.error("4. Error detectado:", response.error);
-      alert("Error de Supabase: " + response.error.message)
-    } else {
-      console.log("4. Éxito total");
-      onSuccess()
-      onClose()
-    }
-  } catch (err) {
-    console.error("Error capturado en el catch:", err);
-    alert("Ocurrió un error inesperado. Revisa la consola.");
-  } finally {
-    console.log("5. Finalizando proceso (setLoading(false))");
-    setLoading(false)
   }
-}
 
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-xl shadow-2xl max-w-md w-full overflow-hidden">
+      <div className="bg-white rounded-xl shadow-2xl max-w-md w-full overflow-hidden flex flex-col">
         <div className="p-6 border-b bg-slate-50">
           <h2 className="text-xl font-bold text-slate-800">
             {proyecto ? 'Editar Proyecto' : 'Nuevo Proyecto'}
@@ -137,10 +144,10 @@ export default function ProyectoModal({ proyecto, isOpen, onClose, onSuccess, su
           </div>
 
           <div className="flex gap-3 pt-6">
-            <Button type="button" variant="outline" className="flex-1" onClick={onClose}>
+            <Button type="button" variant="outline" className="flex-1" onClick={onClose} disabled={loading}>
               Cancelar
             </Button>
-            <Button type="submit" className="flex-1" disabled={loading}>
+            <Button type="submit" className="flex-1 bg-blue-600 hover:bg-blue-700" disabled={loading}>
               {loading ? 'Guardando...' : proyecto ? 'Actualizar' : 'Crear Proyecto'}
             </Button>
           </div>

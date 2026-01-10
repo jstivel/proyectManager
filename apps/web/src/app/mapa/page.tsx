@@ -1,29 +1,34 @@
+// apps/web/src/app/mapa/page.tsx
 'use client'
 
 import { useSearchParams } from 'next/navigation'
 import Map from '@/components/map/Map'
 import { Loader2 } from 'lucide-react'
+import { Suspense } from 'react'
 
-export default function MapaPage() {
+function MapaContent() {
   const searchParams = useSearchParams()
   const proyectoId = searchParams.get('id')
 
-  if (!proyectoId) {
-    return (
-      <div className="flex h-screen w-screen items-center justify-center bg-slate-50">
-        <div className="flex flex-col items-center gap-2">
-          <Loader2 className="h-6 w-6 animate-spin text-blue-600" />
-          <p className="text-xs font-bold uppercase text-slate-500">
-            Selecciona un proyecto
-          </p>
-        </div>
-      </div>
-    )
-  }
-
-  return (
-    <div className="h-screen w-screen">
-      <Map proyectoId={proyectoId} />
+  if (!proyectoId) return (
+    <div className="flex h-screen w-screen items-center justify-center">
+      <p className="text-slate-500 font-bold">PROYECTO NO ENCONTRADO</p>
     </div>
+  )
+
+  return <Map proyectoId={proyectoId} />
+}
+
+export default function MapaPage() {
+  return (
+    <Suspense fallback={
+      <div className="flex h-screen w-screen items-center justify-center">
+        <Loader2 className="animate-spin text-blue-600" />
+      </div>
+    }>
+      <div className="h-screen w-screen">
+        <MapaContent />
+      </div>
+    </Suspense>
   )
 }

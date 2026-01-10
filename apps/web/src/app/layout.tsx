@@ -1,3 +1,5 @@
+import QueryProvider from '@/providers/QueryProvider'
+
 import { AuthProvider } from '@/context/AuthContext'
 import './globals.css'
 
@@ -6,7 +8,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="es">
       <body>
         <AuthProvider>
-          {children}
+          <QueryProvider>
+            {children}
+          </QueryProvider>
         </AuthProvider>
       </body>
     </html>
