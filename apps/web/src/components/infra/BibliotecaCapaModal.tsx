@@ -366,6 +366,7 @@ export default function BibliotecaCapaModal({ isOpen, onClose, onSuccess, capa }
                         <option value="date">Fecha</option>
                         <option value="boolean">Interruptor (Si/No)</option>
                         <option value="select">Lista de Selección</option>
+                        <option value="multiselect">Multiselección (Checkbox)</option>
                       </select>
                     </div>
 

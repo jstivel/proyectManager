@@ -61,10 +61,15 @@ export function useInfraMutations() {
         )
       ]);
     },
-    onSuccess: (data) => {
+    onSuccess: (data, variables) => {
       console.log("✅ Guardado exitoso:", data);
-      // Invalidamos la cache para que el mapa se refresque automáticamente
+      // 1. Invalidar la lista general (puntos en el mapa)
       queryClient.invalidateQueries({ queryKey: ['infraestructuras'] });
+      // 2. INVALIDACIÓN CLAVE: Si había un ID de edición, borramos esa ficha específica
+      // para que cuando se vuelva a abrir, React Query la pida de nuevo a la BD.
+      if (variables.idEdicion) {
+        queryClient.invalidateQueries({ queryKey: ['feature_data', variables.idEdicion] });
+      }
     },
     onError: (error: any) => {
       console.error("❌ Error final en saveMutation:", error);
