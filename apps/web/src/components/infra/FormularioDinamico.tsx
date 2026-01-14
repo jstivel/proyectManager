@@ -9,6 +9,7 @@ import {
 } from 'lucide-react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useInfraMutations } from '@/hooks/useInfraMutations'
+import imageCompression from 'browser-image-compression';
 
 interface Props {
   capaId: string
@@ -40,7 +41,7 @@ export default function FormularioDinamico({
   
   const { saveMutation, deleteMutation } = useInfraMutations()
 
-  // 1. Cargar Definiciones
+  // 1. Cargar Definiciones de Atributos
   const { data: atributos, isLoading: loadingDefs } = useQuery({
     queryKey: ['attribute_definitions', capaId],
     queryFn: async () => {
@@ -54,14 +55,38 @@ export default function FormularioDinamico({
     }
   })
 
-  // 2. Cargar Datos y Fotos
+  // 2. Cargar Datos, Fotos e ID Técnico
   const { data: featureData, isLoading: loadingFeature } = useQuery({
     queryKey: ['feature_data', idEdicion],
     queryFn: async () => {
       if (!idEdicion) return null
-      const { data: attrData } = await supabase.from('feature_attributes').select('data').eq('feature_id', idEdicion).maybeSingle()
-      const { data: photosData } = await supabase.from('feature_photos').select('*').eq('feature_id', idEdicion).order('creado_en', { ascending: false })
-      return { attributes: attrData?.data || null, photos: photosData || [] }
+      
+      // Consultamos id_tecnico de la tabla features
+      const { data: featBase } = await supabase
+        .from('features')
+        .select('id_tecnico')
+        .eq('id', idEdicion)
+        .maybeSingle()
+
+      // Consultamos atributos dinámicos
+      const { data: attrData } = await supabase
+        .from('feature_attributes')
+        .select('data')
+        .eq('feature_id', idEdicion)
+        .maybeSingle()
+
+      // Consultamos fotos
+      const { data: photosData } = await supabase
+        .from('feature_photos')
+        .select('*')
+        .eq('feature_id', idEdicion)
+        .order('creado_en', { ascending: false })
+
+      return { 
+        id_tecnico: featBase?.id_tecnico || null,
+        attributes: attrData?.data || null, 
+        photos: photosData || [] 
+      }
     },
     enabled: !!idEdicion,
   })
@@ -78,7 +103,7 @@ export default function FormularioDinamico({
       atributos.forEach(atrib => {
         if (atrib.tipo === 'multiselect') inicial[atrib.campo] = [];
         else if (atrib.tipo === 'boolean') inicial[atrib.campo] = null;
-        else if (atrib.tipo === 'number' || atrib.tipo === 'decimal') inicial[atrib.campo] = ''; // Cambiado a '' para evitar error
+        else if (atrib.tipo === 'number' || atrib.tipo === 'decimal') inicial[atrib.campo] = '';
         else inicial[atrib.campo] = '';
       });
       setFormData(inicial);
@@ -92,7 +117,7 @@ export default function FormularioDinamico({
     let valorFinal = valor;
 
     if (valor === '' || valor === null) {
-      valorFinal = tipo === 'multiselect' ? [] : ''; // Mantenemos string vacío si es nulo para controlados
+      valorFinal = tipo === 'multiselect' ? [] : '';
     } else {
       switch (tipo) {
         case 'number': valorFinal = valor === '' ? '' : parseInt(valor, 10); break;
@@ -104,40 +129,68 @@ export default function FormularioDinamico({
     if (errors[campo]) setErrors(prev => ({ ...prev, [campo]: '' }));
   }
 
-  // GESTIÓN DE FOTOS
+  // GESTIÓN DE FOTOS CON COMPRESIÓN HD
   const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (!e.target.files?.[0] || !idEdicion) return
-    setSubiendoFoto(true)
-    const file = e.target.files[0]
-    const filePath = `${proyectoId}/${idEdicion}/${Date.now()}_${file.name}`
+    if (!e.target.files?.[0] || !idEdicion) return;
+    setSubiendoFoto(true);
+    const file = e.target.files[0];
+
+    const options = {
+      maxSizeMB: 0.3,
+      maxWidthOrHeight: 1600,
+      useWebWorker: true,
+      fileType: 'image/jpeg'
+    };
+
     try {
-      await supabase.storage.from('feature-photos').upload(filePath, file)
-      const { data: userData } = await supabase.auth.getUser()
-      await supabase.from('feature_photos').insert({
-        feature_id: idEdicion, storage_path: filePath, creado_por: userData.user?.id
-      })
-      queryClient.invalidateQueries({ queryKey: ['feature_data', idEdicion] })
-    } catch (err: any) { alert(err.message) } finally { setSubiendoFoto(false) }
-  }
+      const compressedFile = await imageCompression(file, options);
+      const fileName = `${Date.now()}_${file.name.replace(/\.[^/.]+$/, "")}.jpg`;
+      const filePath = `${proyectoId}/${idEdicion}/${fileName}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from('feature-photos')
+        .upload(filePath, compressedFile);
+
+      if (uploadError) throw uploadError;
+
+      const { data: userData } = await supabase.auth.getUser();
+      const { error: insertError } = await supabase.from('feature_photos').insert({
+        feature_id: idEdicion, 
+        storage_path: filePath, 
+        creado_por: userData.user?.id
+      });
+
+      if (insertError) throw insertError;
+      queryClient.invalidateQueries({ queryKey: ['feature_data', idEdicion] });
+
+    } catch (err: any) { 
+      alert(`Error al procesar imagen: ${err.message}`); 
+    } finally { 
+      setSubiendoFoto(false); 
+    }
+  };
 
   const handleEliminarFoto = async (fotoId: string, path: string) => {
-    if (!confirm('¿Eliminar esta fotografía?')) return
+    if (!confirm('¿Eliminar esta fotografía?')) return;
     try {
-      await supabase.storage.from('feature-photos').remove([path])
-      await supabase.from('feature_photos').delete().eq('id', fotoId)
-      queryClient.invalidateQueries({ queryKey: ['feature_data', idEdicion] })
-    } catch (err: any) { alert(err.message) }
-  }
+      await supabase.storage.from('feature-photos').remove([path]);
+      await supabase.from('feature_photos').delete().eq('id', fotoId);
+      queryClient.invalidateQueries({ queryKey: ['feature_data', idEdicion] });
+    } catch (err: any) { 
+      alert(err.message); 
+    }
+  };
 
   const handleSubmit = async () => {
     saveMutation.mutate({ idEdicion, proyectoId, capaId, coords: coordenadas, formData }, {
       onSuccess: () => {
         queryClient.invalidateQueries({ queryKey: ['infraestructuras'] });
-        onSave(); onClose();
+        onSave(); 
+        onClose();
       },
       onError: (err: any) => setBackendError(err.message)
-    })
-  }
+    });
+  };
 
   const isLoading = loadingDefs || (!!idEdicion && loadingFeature)
   const isSaving = saveMutation.isPending || deleteMutation.isPending
@@ -160,13 +213,21 @@ export default function FormularioDinamico({
         
         {/* Header */}
         <div className="p-4 border-b bg-slate-900 text-white flex items-center justify-between">
-          <div>
+          <div className="flex flex-col">
             <div className="flex items-center gap-2">
               <MapPin size={18} className="text-blue-400" />
-              <h2 className="font-bold text-sm tracking-tight">{idEdicion ? 'Ficha Técnica' : 'Nuevo Registro'}</h2>
+              <h2 className="font-bold text-sm tracking-tight">
+                {idEdicion ? 'Ficha Técnica' : 'Nuevo Registro'}
+              </h2>
+              {/* ID TÉCNICO AMIGABLE */}
+              {idEdicion && featureData?.id_tecnico && (
+                <span className="bg-blue-600 text-white px-2 py-0.5 rounded-md text-[11px] font-black border border-blue-400 shadow-sm">
+                  {featureData.id_tecnico}
+                </span>
+              )}
             </div>
             {idEdicion && (
-              <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full mt-1 inline-block ${modoEdicion ? 'bg-orange-500' : 'bg-green-600'}`}>
+              <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full mt-1.5 inline-block w-fit ${modoEdicion ? 'bg-orange-500' : 'bg-green-600'}`}>
                 {modoEdicion ? 'MODO EDICIÓN' : 'MODO LECTURA'}
               </span>
             )}
@@ -183,7 +244,6 @@ export default function FormularioDinamico({
               <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider">{atrib.campo}</label>
               
               <div className={!modoEdicion ? "pointer-events-none" : ""}>
-                {/* 1. BOOLEANOS (BOTONES) */}
                 {atrib.tipo === 'boolean' && (
                   <div className="flex gap-2">
                     <button
@@ -199,7 +259,6 @@ export default function FormularioDinamico({
                   </div>
                 )}
 
-                {/* 2. FECHA */}
                 {atrib.tipo === 'date' && (
                   <div className="relative">
                     <Calendar className="absolute left-3 top-2.5 text-slate-400" size={14} />
@@ -212,7 +271,6 @@ export default function FormularioDinamico({
                   </div>
                 )}
 
-                {/* 3. SELECT */}
                 {atrib.tipo === 'select' && (
                   <select 
                     className={`w-full p-2 text-sm border rounded ${!modoEdicion ? 'bg-slate-50 border-transparent appearance-none' : 'bg-white'}`} 
@@ -224,7 +282,6 @@ export default function FormularioDinamico({
                   </select>
                 )}
 
-                {/* 4. MULTISELECT */}
                 {atrib.tipo === 'multiselect' && (
                   <div className="grid grid-cols-2 gap-2">
                     {atrib.opciones?.map((opt: string) => {
@@ -243,7 +300,6 @@ export default function FormularioDinamico({
                   </div>
                 )}
 
-                {/* 5. TEXTO / NÚMERO */}
                 {!['boolean', 'date', 'select', 'multiselect'].includes(atrib.tipo) && (
                   <input 
                     type={atrib.tipo === 'number' || atrib.tipo === 'decimal' ? 'number' : 'text'}
@@ -266,7 +322,7 @@ export default function FormularioDinamico({
                   const url = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/feature-photos/${foto.storage_path}`;
                   return (
                     <div key={foto.id} className="group aspect-square bg-slate-100 rounded-lg border overflow-hidden relative">
-                      <img src={url} className="w-full h-full object-cover cursor-pointer" onClick={() => setFotoZoom(url)} />
+                      <img src={url} className="w-full h-full object-cover cursor-pointer" onClick={() => setFotoZoom(url)} alt="Infra" />
                       {modoEdicion && (
                         <button type="button" onClick={() => handleEliminarFoto(foto.id, foto.storage_path)} className="absolute top-1 right-1 p-1 bg-red-600 text-white rounded opacity-0 group-hover:opacity-100"><Trash2 size={12} /></button>
                       )}
