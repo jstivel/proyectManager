@@ -62,7 +62,6 @@ export default function DashboardList({ initialProyectos, supervisores }: any) {
               <span className="font-semibold">{proy.usuarios?.nombre || 'No asignado'}</span>
             </div>
 
-            {/* AQUÍ RECUPERAMOS LOS BOTONES QUE FALTABAN */}
             <div className="grid grid-cols-2 gap-3">
               <Button
                 variant="outline"

@@ -1,7 +1,8 @@
 'use client'
 
 import { createContext, useContext, useEffect, useState } from 'react'
-import { supabase } from '@/lib/supabase'
+import { createClient } from '@/utils/supabase/client' 
+import { useRouter } from 'next/navigation'
 
 const AuthContext = createContext<any>(null)
 
@@ -9,11 +10,12 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [user, setUser] = useState<any>(null)
   const [perfil, setPerfil] = useState<any>(null)
   const [loading, setLoading] = useState(true)
+  const supabase = createClient() // Cliente del lado del navegador con SSR
+  const router = useRouter()
 
   useEffect(() => {
-    let isMounted = true; // Control para evitar fugas de memoria
+    let isMounted = true
 
-    // Función unificada para obtener el perfil
     const fetchPerfil = async (userId: string) => {
       try {
         const { data, error } = await supabase
@@ -22,7 +24,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
           .eq('id', userId)
           .single()
         
-        if (error) throw error;
+        if (error) throw error
         if (isMounted) setPerfil(data)
       } catch (error) {
         console.error("Error cargando perfil:", error)
@@ -32,23 +34,39 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       }
     }
 
-    // Escuchamos cambios de auth (esto ya detecta la sesión inicial automáticamente)
-    const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
+    // Inicializar sesión
+    const initializeAuth = async () => {
+      const { data: { session } } = await supabase.auth.getSession()
       if (session?.user) {
         setUser(session.user)
         await fetchPerfil(session.user.id)
       } else {
+        setLoading(false)
+      }
+    }
+
+    initializeAuth()
+
+    const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (session?.user) {
+        setUser(session.user)
+        await fetchPerfil(session.user.id)
+        
+        // Si el evento es un login o cambio de password, refrescar para asegurar cookies
+        if (event === 'SIGNED_IN') router.refresh()
+      } else {
         setUser(null)
         setPerfil(null)
         setLoading(false)
+        if (event === 'SIGNED_OUT') router.push('/login')
       }
     })
 
     return () => {
-      isMounted = false;
+      isMounted = false
       authListener.subscription.unsubscribe()
     }
-  }, [])
+  }, [router, supabase])
 
   return (
     <AuthContext.Provider value={{ user, perfil, loading }}>
