@@ -1,85 +1,70 @@
 'use client'
 
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { createClient } from '@/utils/supabase/client'
+import { saveInfraestructura, deleteInfraestructura } from '@/app/actions/infraestructura'
+import { toast } from 'sonner'
 
-// Definimos la interfaz para los límites del mapa para TypeScript
-interface MapBounds {
-  sw: { lng: number; lat: number };
-  ne: { lng: number; lat: number };
-}
-
-/**
- * Hook para obtener infraestructuras de forma dinámica basadas en el área visible.
- * Utiliza una función RPC en el servidor para máxima estabilidad con filtros espaciales.
- */
-export function useInfraestructuras(proyectoId: string | null, bounds: MapBounds | null) {
+export function useInfraestructura(proyectoId?: string | null) {
   const supabase = createClient()
+  const queryClient = useQueryClient()
 
-  return useQuery({
-    // 1. CLAVE DE CONSULTA: Incluye proyecto y límites para invalidar caché al mover el mapa
-    queryKey: ['infraestructuras', proyectoId, bounds],
-    
+  // 1. Carga para el Mapa (Bounding Box)
+  const useMapa = (bounds: any) => useQuery({
+    queryKey: ['infra_mapa', proyectoId, bounds],
     queryFn: async () => {
-      // Validación de seguridad para evitar peticiones vacías
       if (!proyectoId || !bounds) return []
-      
-      console.log("🔄 Sincronizando infraestructura vía RPC (BBox)...");
-
-      /**
-       * LLAMADA RPC:
-       * Usamos la función remota para evitar errores de sintaxis en el cliente
-       * y aprovechar el índice espacial ST_MakeEnvelope en el servidor.
-       */
-      const fetchPromise = supabase.rpc('get_infra_by_bbox', {
+      const { data, error } = await supabase.rpc('get_infra_by_bbox', {
         p_proyecto_id: proyectoId,
-        min_lng: bounds.sw.lng,
-        min_lat: bounds.sw.lat,
-        max_lng: bounds.ne.lng,
-        max_lat: bounds.ne.lat
-      });
+        min_lng: bounds.sw.lng, min_lat: bounds.sw.lat,
+        max_lng: bounds.ne.lng, max_lat: bounds.ne.lat
+      })
+      if (error) throw error
+      return data
+    },
+    enabled: !!proyectoId && !!bounds,
+    placeholderData: (prev) => prev
+  })
 
-      // 3. TIMEOUT DE SEGURIDAD: 10 segundos antes de abortar por lentitud de red/DB
-      const timeoutPromise = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('DATABASE_TIMEOUT')), 10000)
-      );
+  // 2. Carga para Ficha Técnica
+  const useDetalle = (featureId?: string | null) => useQuery({
+    queryKey: ['infra_detalle', featureId],
+    queryFn: async () => {
+      if (!featureId) return null
+      const { data, error } = await supabase.rpc('get_feature_detallado_rpc', { p_feature_id: featureId })
+      if (error) throw error
+      return data ? data[0] : null
+    },
+    enabled: !!featureId
+  })
 
-      try {
-        // Carrera entre la petición y el timeout
-        const result: any = await Promise.race([fetchPromise, timeoutPromise]);
-        
-        if (result.error) {
-          console.error("❌ Error de Postgres:", result.error);
-          throw result.error;
-        }
-        
-        return result.data || [];
-      } catch (err: any) {
-        if (err.message === 'DATABASE_TIMEOUT') {
-          console.error("🚨 La base de datos tardó demasiado en responder al BBox query.");
-        } else {
-          console.error("🚨 Error inesperado:", err);
-        }
-        throw err;
+  const saveMutation = useMutation({
+    mutationFn: saveInfraestructura,
+    onSuccess: (result) => {
+      if (result.error) {
+        toast.error(result.error)
+      } else {
+        queryClient.invalidateQueries({ queryKey: ['infra_mapa'] })
+        queryClient.invalidateQueries({ queryKey: ['infra_detalle'] })
+        toast.success('Infraestructura guardada')
       }
     },
+    onError: (err: any) => toast.error('Error al guardar: ' + err.message)
+  })
 
-    // --- CONFIGURACIÓN DE FUNCIONALIDAD ---
-    
-    // Solo se activa si tenemos ID de proyecto y el mapa ha reportado sus coordenadas
-    enabled: !!proyectoId && !!bounds,
+  const deleteMutation = useMutation({
+    mutationFn: ({ id, proyectoId }: { id: string, proyectoId: string }) => 
+      deleteInfraestructura(id, proyectoId),
+    onSuccess: (result) => {
+      if (result.error) {
+        toast.error(result.error)
+      } else {
+        queryClient.invalidateQueries({ queryKey: ['infra_mapa'] })
+        toast.success('Elemento eliminado')
+      }
+    },
+    onError: (err: any) => toast.error('Error al eliminar: ' + err.message)
+  })
 
-    // staleTime: Mantiene los datos como "válidos" por 10 segundos para suavizar el movimiento
-    staleTime: 1000 * 10, 
-
-    // refetchInterval: Sincroniza automáticamente cambios de otros usuarios cada 30 segundos
-    refetchInterval: 1000 * 30,
-
-    // refetchOnWindowFocus: Actualiza los puntos al volver a la pestaña de la app
-    refetchOnWindowFocus: true,
-
-    // placeholderData: Mantiene los puntos anteriores mientras carga los nuevos.
-    // Esto es lo que evita que los iconos desaparezcan y aparezcan (parpadeo) al mover el mapa.
-    placeholderData: (previousData) => previousData, 
-  });
+  return { useMapa, useDetalle, saveMutation, deleteMutation }
 }

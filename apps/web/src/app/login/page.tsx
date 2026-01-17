@@ -1,72 +1,105 @@
-'use client'
+'use client';
 
-import { useActionState } from 'react' // Hook moderno de React para formularios
-import { loginAction } from './actions'
-import { Button } from '@/components/ui/button'
+import { useActionState } from 'react';
+import { loginAction } from './actions';
+import { KeyRound, Mail, Loader2, AlertCircle, ShieldCheck } from 'lucide-react';
 
 export default function LoginPage() {
-  /**
-   * useActionState recibe:
-   * 1. La función que se ejecutará (nuestra Server Action).
-   * 2. El estado inicial (en este caso, null para el error).
-   * * Devuelve:
-   * - state: El resultado que devuelve la acción (el mensaje de error si falla).
-   * - formAction: La función que vincularemos al formulario.
-   * - isPending: Un booleano automático que indica si la acción se está ejecutando.
-   */
-  const [state, formAction, isPending] = useActionState(loginAction, null)
+  // Usamos useActionState para manejar el estado del servidor (error, pending, etc.)
+  const [state, formAction, isPending] = useActionState(loginAction, null);
 
   return (
-    <div className="flex flex-col max-w-[400px] mx-auto mt-[100px] gap-6 p-6 border rounded-lg shadow-sm">
-      <h1 className="text-2xl font-bold text-center text-slate-800">
-        Telecom Admin
-      </h1>
-      <p className="text-sm text-center text-slate-500 -mt-4">
-        Ingresa tus credenciales para acceder al panel
-      </p>
-
-      {/* Vinculamos el formulario directamente a la acción. 
-         Next.js se encarga de recolectar los datos (email, password) 
-         y enviarlos al servidor de forma segura.
-      */}
-      <form action={formAction} className="flex flex-col gap-4">
-        <div className="flex flex-col gap-2">
-          <label htmlFor="email" className="text-sm font-medium">Email</label>
-          <input
-            id="email"
-            name="email"
-            type="email"
-            placeholder="correo@empresa.com"
-            required
-            disabled={isPending}
-            className="border p-2 rounded-md text-black focus:ring-2 focus:ring-blue-500 outline-none disabled:bg-slate-50"
-          />
+    <div className="min-h-screen bg-[#f8fafc] flex items-center justify-center p-4">
+      <div className="max-w-[440px] w-full">
+        {/* Logo / Header */}
+        <div className="text-center mb-10">
+          <div className="inline-flex items-center justify-center w-16 h-16 bg-blue-600 rounded-2xl shadow-xl shadow-blue-100 mb-6">
+            <ShieldCheck className="w-8 h-8 text-white" />
+          </div>
+          <h1 className="text-3xl font-black text-slate-900 tracking-tight mb-2">
+            Bienvenido de nuevo
+          </h1>
+          <p className="text-slate-500 font-medium">
+            Gestión de Infraestructura v2.0
+          </p>
         </div>
 
-        <div className="flex flex-col gap-2">
-          <label htmlFor="password" className="text-sm font-medium">Contraseña</label>
-          <input
-            id="password"
-            name="password"
-            type="password"
-            placeholder="••••••••"
-            required
-            disabled={isPending}
-            className="border p-2 rounded-md text-black focus:ring-2 focus:ring-blue-500 outline-none disabled:bg-slate-50"
-          />
+        {/* Card del Formulario */}
+        <div className="bg-white rounded-[2.5rem] p-8 md:p-10 shadow-2xl shadow-slate-200 border border-slate-100">
+          <form action={formAction} className="space-y-6">
+            
+            {/* Input de Email */}
+            <div className="space-y-2">
+              <label className="text-sm font-bold text-slate-700 ml-1">
+                Correo Electrónico
+              </label>
+              <div className="relative group">
+                <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                  <Mail className="w-5 h-5 text-slate-400 group-focus-within:text-blue-600 transition-colors" />
+                </div>
+                <input
+                  name="email"
+                  type="email"
+                  required
+                  placeholder="nombre@empresa.com"
+                  className="block w-full pl-11 pr-4 py-4 bg-slate-50 border-2 border-slate-50 rounded-2xl text-slate-900 placeholder:text-slate-400 focus:bg-white focus:border-blue-600 focus:ring-0 transition-all outline-none"
+                />
+              </div>
+            </div>
+
+            {/* Input de Password */}
+            <div className="space-y-2">
+              <div className="flex justify-between items-center ml-1">
+                <label className="text-sm font-bold text-slate-700">
+                  Contraseña
+                </label>
+              </div>
+              <div className="relative group">
+                <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                  <KeyRound className="w-5 h-5 text-slate-400 group-focus-within:text-blue-600 transition-colors" />
+                </div>
+                <input
+                  name="password"
+                  type="password"
+                  required
+                  placeholder="••••••••"
+                  className="block w-full pl-11 pr-4 py-4 bg-slate-50 border-2 border-slate-50 rounded-2xl text-slate-900 placeholder:text-slate-400 focus:bg-white focus:border-blue-600 focus:ring-0 transition-all outline-none"
+                />
+              </div>
+            </div>
+
+            {/* Mensaje de Error (Desde el Action) */}
+            {state?.error && (
+              <div className="flex items-center gap-3 bg-red-50 border border-red-100 text-red-600 p-4 rounded-2xl animate-in fade-in slide-in-from-top-2">
+                <AlertCircle className="w-5 h-5 shrink-0" />
+                <p className="text-sm font-bold leading-tight">{state.error}</p>
+              </div>
+            )}
+
+            {/* Botón de Submit */}
+            <button
+              type="submit"
+              disabled={isPending}
+              className="w-full bg-slate-900 hover:bg-slate-800 disabled:bg-slate-400 text-white font-bold py-4 rounded-2xl shadow-lg shadow-slate-200 transition-all flex items-center justify-center gap-2 group"
+            >
+              {isPending ? (
+                <Loader2 className="w-5 h-5 animate-spin" />
+              ) : (
+                <>
+                  Entrar al sistema
+                  <span className="group-hover:translate-x-1 transition-transform">→</span>
+                </>
+              )}
+            </button>
+          </form>
         </div>
 
-        <Button type="submit" disabled={isPending} className="w-full">
-          {isPending ? 'Validando...' : 'Iniciar Sesión'}
-        </Button>
-      </form>
-
-      {/* Mostramos el error si la Server Action devuelve uno */}
-      {state?.error && (
-        <p className="bg-red-50 border border-red-200 text-red-600 px-4 py-2 rounded-md text-sm text-center">
-          {state.error}
+        {/* Footer del login */}
+        <p className="text-center mt-10 text-sm text-slate-400 font-medium">
+          ¿Problemas con tu acceso? <br />
+          <span className="text-slate-600 font-bold cursor-pointer hover:text-blue-600">Contacta a soporte técnico</span>
         </p>
-      )}
+      </div>
     </div>
-  )
+  );
 }

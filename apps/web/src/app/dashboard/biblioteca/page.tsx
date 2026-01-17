@@ -4,14 +4,14 @@ import BibliotecaList from './BibliotecaList'
 export default async function BibliotecaPage() {
   const supabase = await createClient()
 
-  // Traemos las capas con sus definiciones de atributos directamente
-  const { data: capas, error } = await supabase
-    .from('feature_types')
-    .select(`*, attribute_definitions (*)`)
-    .order('nombre')
+  /**
+   * Cambiamos la consulta directa .from('feature_types')
+   * por el RPC get_biblioteca_segura() que ya incluye los atributos.
+   */
+  const { data: capas, error } = await supabase.rpc('get_biblioteca_segura')
 
   if (error) {
-    console.error("Error cargando biblioteca:", error.message)
+    console.error("Error cargando biblioteca segura:", error.message)
   }
 
   return (

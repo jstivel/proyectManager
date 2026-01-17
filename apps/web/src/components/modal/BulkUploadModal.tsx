@@ -1,4 +1,3 @@
-// components/infra/BulkUploadModal.tsx
 'use client'
 
 import React, { useState } from 'react';
@@ -24,6 +23,9 @@ export default function BulkUploadModal({ proyectoId, capa, onClose, onSuccess }
   const [dataReady, setDataReady] = useState<any[]>([]);
   const supabase = createClient();
 
+  /**
+   * Procesa el archivo CSV, valida estructura técnica y normaliza datos para la BD.
+   */
   const handleProcessCsv = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -54,7 +56,7 @@ export default function BulkUploadModal({ proyectoId, capa, onClose, onSuccess }
           return;
         }
 
-        // 2. Filtrado de filas (omitir ejemplo e instrucciones)
+        // 2. Filtrado de filas (omitir ejemplo e instrucciones del template)
         const rows = results.data.filter(r => 
            r.latitude !== '4.612345' && Object.values(r).some(v => v !== "" && v !== null)
         );
@@ -101,7 +103,7 @@ export default function BulkUploadModal({ proyectoId, capa, onClose, onSuccess }
             }
           });
 
-          // Finalmente, ensamblamos la fila validada
+          // Ensamblaje de la fila validada para el RPC
           validatedData.push({
             latitude: lat,
             longitude: lng,
@@ -116,6 +118,9 @@ export default function BulkUploadModal({ proyectoId, capa, onClose, onSuccess }
     });
   };
 
+  /**
+   * Ejecuta el RPC 'bulk_insert_features' para inserción masiva atómica.
+   */
   const handleUpload = async () => {
     setLoading(true);
     try {
@@ -132,7 +137,6 @@ export default function BulkUploadModal({ proyectoId, capa, onClose, onSuccess }
       onSuccess();
     } catch (err: any) {
       console.error("Error en carga masiva:", err);
-      // Extraemos el mensaje de error de PostgreSQL para que sea legible
       const errorMsg = err.message || "Error desconocido en el servidor";
       alert("Error de Integridad: " + errorMsg);
     } finally {
@@ -142,58 +146,94 @@ export default function BulkUploadModal({ proyectoId, capa, onClose, onSuccess }
 
   return (
     <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-[110] flex items-center justify-center p-4">
-      <div className="bg-white w-full max-w-lg rounded-2xl shadow-2xl border border-slate-200 overflow-hidden text-slate-900">
+      <div className="bg-white w-full max-w-lg rounded-2xl shadow-2xl border border-slate-200 overflow-hidden text-slate-900 animate-in fade-in zoom-in-95 duration-200">
         
+        {/* Header */}
         <div className="p-5 border-b bg-slate-50 flex justify-between items-center">
           <div>
-            <h3 className="font-black text-slate-800 uppercase text-xs tracking-widest">Validador de Carga</h3>
-            <p className="text-[10px] text-blue-600 font-bold uppercase">Capa: {capa.nombre}</p>
+            <h3 className="font-black text-slate-800 uppercase text-xs tracking-widest leading-none">Validador de Carga</h3>
+            <p className="text-[10px] text-blue-600 font-bold uppercase mt-1">Capa: {capa.nombre}</p>
           </div>
-          <button onClick={onClose} className="text-slate-400 hover:text-red-500 font-bold transition-colors">✕</button>
+          <button 
+            onClick={onClose} 
+            className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-slate-200 text-slate-400 hover:text-red-500 transition-all font-bold"
+          >
+            ✕
+          </button>
         </div>
 
         <div className="p-6">
+          {/* Alerta Informativa */}
           <div className="mb-4 p-3 bg-amber-50 border border-amber-100 rounded-lg">
             <p className="text-[10px] text-amber-700 leading-tight">
-              <strong>Importante:</strong> Se están ignorando las columnas de ID Técnico para permitir la autogeneración por parte del sistema y evitar errores de duplicidad.
+              <strong>Importante:</strong> Se están ignorando las columnas de ID Técnico para permitir la autogeneración por parte del sistema y evitar errores de duplicidad de registros.
             </p>
           </div>
 
+          {/* Zona de Drop/Upload */}
           <label className={`flex flex-col items-center justify-center w-full h-32 border-2 border-dashed rounded-2xl cursor-pointer transition-all mb-4 ${
-            dataReady.length > 0 ? 'border-green-400 bg-green-50' : 'border-slate-300 hover:bg-slate-50'
+            dataReady.length > 0 
+              ? 'border-green-400 bg-green-50 shadow-inner' 
+              : 'border-slate-300 hover:bg-slate-50 hover:border-blue-400'
           }`}>
-            <FileUp className={dataReady.length > 0 ? 'text-green-500' : 'text-slate-400'} size={32} />
-            <span className="text-[10px] font-black text-slate-500 uppercase mt-2">
-              {dataReady.length > 0 ? `${dataReady.length} Filas Preparadas` : "Seleccionar Archivo .CSV"}
+            <div className={`p-3 rounded-full mb-1 ${dataReady.length > 0 ? 'bg-green-100' : 'bg-slate-100'}`}>
+              <FileUp className={dataReady.length > 0 ? 'text-green-500' : 'text-slate-400'} size={24} />
+            </div>
+            <span className="text-[10px] font-black text-slate-500 uppercase tracking-tighter">
+              {dataReady.length > 0 ? `${dataReady.length} Filas Preparadas para Inserción` : "Seleccionar Archivo .CSV"}
             </span>
             <input type="file" className="hidden" accept=".csv" onChange={handleProcessCsv} disabled={loading} />
           </label>
 
+          {/* Visualización de Errores */}
           {errors.length > 0 && (
-            <div className="bg-red-50 border border-red-100 rounded-xl p-4 mb-4 max-h-40 overflow-y-auto">
+            <div className="bg-red-50 border border-red-100 rounded-xl p-4 mb-4 max-h-40 overflow-y-auto shadow-sm">
               <div className="flex items-center gap-2 text-red-700 font-black text-[10px] uppercase mb-2">
                 <AlertTriangle size={14} /> Errores detectados:
               </div>
-              {errors.map((err, i) => (
-                <p key={i} className="text-[10px] text-red-600 font-medium mb-1">
-                  • {err.message} {err.line > 0 && `(Línea ${err.line})`}
-                </p>
-              ))}
+              <div className="space-y-1">
+                {errors.map((err, i) => (
+                  <p key={i} className="text-[10px] text-red-600 font-medium flex items-start gap-1">
+                    <span className="opacity-50">•</span> 
+                    <span>{err.message} {err.line > 0 && <span className="font-bold underline">(Línea {err.line})</span>}</span>
+                  </p>
+                ))}
+              </div>
             </div>
           )}
 
+          {/* Acciones */}
           <div className="flex gap-3 mt-4">
-            <Button variant="outline" onClick={onClose} className="flex-1 font-bold text-xs h-12 uppercase" disabled={loading}>
+            <Button 
+              variant="outline" 
+              onClick={onClose} 
+              className="flex-1 font-black text-[10px] h-12 uppercase tracking-widest border-slate-200 text-slate-500" 
+              disabled={loading}
+            >
               Cancelar
             </Button>
             <Button 
               disabled={dataReady.length === 0 || loading || errors.length > 0}
               onClick={handleUpload}
-              className="flex-[2] bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs h-12 uppercase transition-all"
+              className={`flex-[2] font-black text-[10px] h-12 uppercase tracking-widest text-white transition-all shadow-lg active:scale-[0.98] ${
+                dataReady.length > 0 ? 'bg-blue-600 hover:bg-blue-700 shadow-blue-200' : 'bg-slate-300'
+              }`}
             >
-              {loading ? <Loader2 className="animate-spin" /> : "Confirmar e Insertar"}
+              {loading ? (
+                <div className="flex items-center gap-2">
+                  <Loader2 className="animate-spin" size={16} />
+                  <span>Insertando Datos...</span>
+                </div>
+              ) : (
+                "Confirmar e Insertar"
+              )}
             </Button>
           </div>
+        </div>
+
+        {/* Footer sutil */}
+        <div className="px-6 py-3 bg-slate-50 border-t flex justify-center">
+          <p className="text-[8px] font-bold text-slate-300 uppercase tracking-[0.2em]">Data Engine v2.0 • Validated Process</p>
         </div>
       </div>
     </div>

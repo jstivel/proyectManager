@@ -10,62 +10,58 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [user, setUser] = useState<any>(null)
   const [perfil, setPerfil] = useState<any>(null)
   const [loading, setLoading] = useState(true)
-  const supabase = createClient() // Cliente del lado del navegador con SSR
+  const supabase = createClient()
   const router = useRouter()
 
+  const cargarPerfilConRPC = async () => {
+    try {
+      // Usamos el RPC que ya definiste en el Layout
+      const { data, error } = await supabase.rpc('get_mi_perfil_seguro')
+      
+      if (error) throw error
+
+      // El RPC devuelve un array, tomamos el primer objeto
+      if (data && data.length > 0) {
+        setPerfil(data[0])
+      }
+    } catch (err) {
+      console.error('Error al obtener perfil vía RPC:', err)
+    }
+  }
+
   useEffect(() => {
-    let isMounted = true
-
-    const fetchPerfil = async (userId: string) => {
-      try {
-        const { data, error } = await supabase
-          .from('usuarios')
-          .select('*, roles(nombre)')
-          .eq('id', userId)
-          .single()
-        
-        if (error) throw error
-        if (isMounted) setPerfil(data)
-      } catch (error) {
-        console.error("Error cargando perfil:", error)
-        if (isMounted) setPerfil(null)
-      } finally {
-        if (isMounted) setLoading(false)
-      }
-    }
-
-    // Inicializar sesión
-    const initializeAuth = async () => {
+    const initialize = async () => {
       const { data: { session } } = await supabase.auth.getSession()
-      if (session?.user) {
-        setUser(session.user)
-        await fetchPerfil(session.user.id)
-      } else {
-        setLoading(false)
+      const currentUser = session?.user ?? null
+      setUser(currentUser)
+      
+      if (currentUser) {
+        await cargarPerfilConRPC()
       }
+      
+      setLoading(false)
     }
 
-    initializeAuth()
+    initialize()
 
     const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if (session?.user) {
-        setUser(session.user)
-        await fetchPerfil(session.user.id)
-        
-        // Si el evento es un login o cambio de password, refrescar para asegurar cookies
-        if (event === 'SIGNED_IN') router.refresh()
-      } else {
+      const currentUser = session?.user ?? null
+      setUser(currentUser)
+      
+      if (event === 'SIGNED_IN') {
+        await cargarPerfilConRPC()
+        router.refresh()
+      }
+      
+      if (event === 'SIGNED_OUT') {
         setUser(null)
         setPerfil(null)
-        setLoading(false)
-        if (event === 'SIGNED_OUT') router.push('/login')
+        router.push('/login')
+        router.refresh()
       }
     })
 
-    return () => {
-      isMounted = false
-      authListener.subscription.unsubscribe()
-    }
+    return () => authListener.subscription.unsubscribe()
   }, [router, supabase])
 
   return (

@@ -21,7 +21,7 @@ interface LayerGis {
 export default function BibliotecaCapaModal({ isOpen, onClose, onSuccess, capa }: any) {
   const [loading, setLoading] = useState(false)
   const [nombre, setNombre] = useState('')
-  const [layerId, setLayerId] = useState('') // Ahora guardamos el UUID de la tabla layers
+  const [layerId, setLayerId] = useState('') // UUID de la tabla layers
   const [layersGis, setLayersGis] = useState<LayerGis[]>([])
   const [icono, setIcono] = useState('MapPin')
   const [atributos, setAtributos] = useState<AtributoInput[]>([
@@ -51,7 +51,7 @@ export default function BibliotecaCapaModal({ isOpen, onClose, onSuccess, capa }
       fetchLayers()
       if (capa) {
         setNombre(capa.nombre || '')
-        setLayerId(capa.layer_id || '') // Usamos layer_id
+        setLayerId(capa.layer_id || '')
         setIcono(capa.icono || 'MapPin')
         const atribsFormateados = capa.attribute_definitions?.map((a: any) => ({
           ...a,
@@ -124,7 +124,7 @@ export default function BibliotecaCapaModal({ isOpen, onClose, onSuccess, capa }
 
       const payload = { 
         nombre, 
-        layer_id: layerId, // Guardamos la relación UUID
+        layer_id: layerId, 
         icono 
       }
 
@@ -194,7 +194,6 @@ export default function BibliotecaCapaModal({ isOpen, onClose, onSuccess, capa }
         throw error;
       }
       
-      // Limpiar estados
       setLayersGis(layersGis.filter(l => l.id !== layerId));
       setLayerId('');
       alert("Capa Maestra eliminada correctamente.");
@@ -207,7 +206,7 @@ export default function BibliotecaCapaModal({ isOpen, onClose, onSuccess, capa }
 
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-xl shadow-2xl max-w-4xl w-full max-h-[90vh] flex flex-col overflow-hidden text-slate-900">
+      <div className="bg-white rounded-xl shadow-2xl max-w-4xl w-full max-h-[90vh] flex flex-col overflow-hidden text-slate-900 animate-in fade-in zoom-in-95 duration-200">
         
         {/* Header */}
         <div className="p-6 border-b bg-slate-50 flex justify-between items-center">
@@ -233,7 +232,6 @@ export default function BibliotecaCapaModal({ isOpen, onClose, onSuccess, capa }
             </div>
 
             <div className="grid grid-cols-2 gap-6">
-              {/* Selector de Layer Maestra */}
               <div className="space-y-2">
                 <div className="flex justify-between items-center">
                   <label className="text-xs font-bold text-slate-600">Capa Maestra (GIS Group)</label>
@@ -260,7 +258,6 @@ export default function BibliotecaCapaModal({ isOpen, onClose, onSuccess, capa }
                     ))}
                   </select>
                   
-                  {/* BOTÓN DE ELIMINAR LAYER MAESTRA */}
                   {layerId && (
                     <Button 
                       type="button" 
@@ -291,14 +288,13 @@ export default function BibliotecaCapaModal({ isOpen, onClose, onSuccess, capa }
                 <p className="text-[10px] text-slate-400 italic">Determina cómo se agruparán los elementos en el mapa.</p>
               </div>
 
-              {/* Nombre Visual */}
               <div className="space-y-2">
                 <label className="text-xs font-bold text-slate-600">Nombre Visual (En App)</label>
                 <div className="relative">
                   <Tags className="absolute left-3 top-2.5 text-slate-400" size={16} />
                   <input 
                     required 
-                    className="w-full p-2.5 pl-10 border rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-sm" 
+                    className="w-full p-2.5 pl-10 border rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-sm font-bold" 
                     placeholder="Ej: Poste Madera 8m" 
                     value={nombre} 
                     onChange={e => setNombre(e.target.value)} 
@@ -326,7 +322,7 @@ export default function BibliotecaCapaModal({ isOpen, onClose, onSuccess, capa }
                     className={`p-3 flex flex-col items-center justify-center rounded-lg border transition-all ${
                       icono === nombreIcono 
                         ? 'bg-blue-600 text-white border-blue-700 shadow-md transform scale-110 z-10' 
-                        : 'bg-white text-slate-400 border-slate-200 hover:border-blue-300 hover:text-blue-500'
+                        : 'bg-white text-slate-400 border-slate-200 hover:border-blue-300 hover:text-blue-500 shadow-sm'
                     }`}
                   >
                     <Icon size={20} />
@@ -336,22 +332,22 @@ export default function BibliotecaCapaModal({ isOpen, onClose, onSuccess, capa }
             </div>
           </section>
 
-          {/* SECCIÓN 3: ATRIBUTOS */}
+          {/* SECCIÓN 3: ATRIBUTOS DINÁMICOS */}
           <section className="space-y-4">
             <div className="flex items-center gap-2 text-slate-400">
               <ChevronRight size={14} />
-              <label className="text-[10px] font-black uppercase tracking-widest">Definición de Atributos</label>
+              <label className="text-[10px] font-black uppercase tracking-widest">Definición de Atributos Técnicos</label>
             </div>
             
             <div className="space-y-3">
               {atributos.map((atrib, index) => (
-                <div key={index} className="group p-4 border rounded-xl bg-white hover:border-blue-200 transition-colors shadow-sm">
+                <div key={index} className="group p-5 border rounded-2xl bg-white hover:border-blue-200 transition-all shadow-sm">
                   <div className="flex gap-4 items-end">
                     <div className="flex-1">
                       <label className="text-[9px] uppercase font-bold text-slate-400 block mb-1">Nombre del Campo</label>
                       <input 
-                        className="w-full p-1 border-b border-slate-100 focus:border-blue-500 outline-none text-sm font-medium" 
-                        placeholder="Ej: Estado del Poste" 
+                        className="w-full p-1 border-b border-slate-100 focus:border-blue-500 outline-none text-sm font-bold text-slate-700" 
+                        placeholder="Ej: Material del Poste" 
                         value={atrib.campo} 
                         onChange={e => handleAtributoChange(index, 'campo', e.target.value)} 
                       />
@@ -359,7 +355,7 @@ export default function BibliotecaCapaModal({ isOpen, onClose, onSuccess, capa }
                     
                     <div className="w-44">
                       <label className="text-[9px] uppercase font-bold text-slate-400 block mb-1">Tipo de Dato</label>
-                      <select className="w-full p-2 border rounded-md text-xs bg-slate-50 outline-none" 
+                      <select className="w-full p-2 border rounded-lg text-xs font-bold bg-slate-50 outline-none cursor-pointer" 
                         value={atrib.tipo} onChange={e => handleAtributoChange(index, 'tipo', e.target.value)}>
                         <option value="text">Texto Corto</option>
                         <option value="number">Valor Numérico</option>
@@ -370,20 +366,20 @@ export default function BibliotecaCapaModal({ isOpen, onClose, onSuccess, capa }
                       </select>
                     </div>
 
-                    <div className="flex items-center gap-2 pb-2 px-2 border-l border-slate-100 ml-2">
+                    <div className="flex items-center gap-2 pb-2 px-3 border-l border-slate-100 ml-2">
                       <input 
                         type="checkbox" 
                         id={`req-${index}`} 
-                        className="w-4 h-4 rounded text-blue-600 border-slate-300 focus:ring-blue-500" 
+                        className="w-4 h-4 rounded text-blue-600 border-slate-300 focus:ring-blue-500 cursor-pointer" 
                         checked={atrib.requerido} 
                         onChange={e => handleAtributoChange(index, 'requerido', e.target.checked)} 
                       />
-                      <label htmlFor={`req-${index}`} className="text-[9px] font-bold text-slate-500 uppercase cursor-pointer">Obligatorio</label>
+                      <label htmlFor={`req-${index}`} className="text-[9px] font-black text-slate-500 uppercase cursor-pointer">Requerido</label>
                     </div>
 
                     <button 
                       type="button" 
-                      className="pb-2 text-slate-300 hover:text-red-500 transition-colors" 
+                      className="pb-2 text-slate-300 hover:text-red-500 transition-colors p-1" 
                       onClick={() => eliminarCampo(index)}
                     >
                       <Trash2 size={18} />
@@ -391,11 +387,11 @@ export default function BibliotecaCapaModal({ isOpen, onClose, onSuccess, capa }
                   </div>
 
                   {(atrib.tipo === 'select' || atrib.tipo === 'multiselect') && (
-                    <div className="mt-4 animate-in fade-in duration-300">
-                      <div className="bg-blue-50 p-3 rounded-lg border border-blue-100">
-                        <label className="text-[9px] font-bold text-blue-600 uppercase block mb-1">Opciones de Lista (Separadas por coma)</label>
-                        <input className="w-full bg-transparent p-1 text-sm outline-none border-b border-blue-200 placeholder:text-blue-300" 
-                          placeholder="Bueno, Regular, Malo, Requiere Cambio..." value={atrib.opciones} 
+                    <div className="mt-4 animate-in fade-in slide-in-from-top-1 duration-300">
+                      <div className="bg-blue-50 p-4 rounded-xl border border-blue-100">
+                        <label className="text-[9px] font-black text-blue-600 uppercase block mb-2 tracking-wider">Opciones del Menú (Separadas por coma)</label>
+                        <input className="w-full bg-transparent p-1 text-sm font-bold text-blue-900 outline-none border-b border-blue-200 placeholder:text-blue-300" 
+                          placeholder="Madera, Concreto, Metal..." value={atrib.opciones} 
                           onChange={e => handleAtributoChange(index, 'opciones', e.target.value)} />
                       </div>
                     </div>
@@ -406,13 +402,18 @@ export default function BibliotecaCapaModal({ isOpen, onClose, onSuccess, capa }
           </section>
         </form>
 
-        {/* Acciones Finales */}
+        {/* Footer */}
         <div className="p-6 border-t bg-slate-50 flex gap-4">
-          <Button type="button" variant="ghost" className="flex-1 text-slate-500 hover:bg-slate-200" onClick={onClose}>
-            Descartar Cambios
+          <Button type="button" variant="ghost" className="flex-1 text-[10px] font-black uppercase tracking-widest text-slate-400 hover:bg-slate-200" onClick={onClose}>
+            Descartar
           </Button>
-          <Button type="submit" onClick={handleSubmit} className="flex-[2] bg-blue-600 hover:bg-blue-700 shadow-lg shadow-blue-200" disabled={loading}>
-            {loading ? <Loader2 className="animate-spin mr-2" size={18} /> : (capa ? 'Guardar Cambios en Biblioteca' : 'Finalizar y Crear Elemento')}
+          <Button 
+            type="submit" 
+            onClick={handleSubmit} 
+            className="flex-[2] bg-blue-600 hover:bg-blue-700 text-white font-black text-[10px] uppercase tracking-widest py-6 rounded-xl shadow-xl shadow-blue-100 active:scale-[0.98] transition-all" 
+            disabled={loading}
+          >
+            {loading ? <Loader2 className="animate-spin mr-2" size={18} /> : (capa ? 'Actualizar Elemento' : 'Crear en Biblioteca')}
           </Button>
         </div>
       </div>

@@ -5,16 +5,17 @@ import { useEffect, useRef, useState } from 'react'
 import { renderToString } from 'react-dom/server'
 import { createClient } from '@/utils/supabase/client'
 import type { FeatureCollection, Point } from 'geojson'
-import { Loader2, X } from 'lucide-react'
+import { Loader2, X, MapPin } from 'lucide-react'
 import * as Icons from 'lucide-react'
 import 'mapbox-gl/dist/mapbox-gl.css'
-import FormularioDinamico from '@/components/infra/FormularioDinamico'
+import FormularioDinamico from '@/components/modal/FormularioDinamico'
 import { useInfraestructuras } from '@/hooks/useInfraestructuras'
 import { useQueryClient } from '@tanstack/react-query'
 import SearchPanel from './SearchPanel'
 import FloatingDock from './FloatingDock' 
 import LayerControl from './LayerControl'
 
+// Configuración de Token
 mapboxgl.accessToken = process.env.NEXT_PUBLIC_MAPBOX_TOKEN!
 
 interface Props {
@@ -46,12 +47,15 @@ export default function Map({ proyectoId }: Props) {
   const [capasVisibles, setCapasVisibles] = useState<string[]>([])
   const [idsResaltados, setIdsResaltados] = useState<string[]>([])
 
-  // --- NUEVO ESTADO PARA CARGA DINÁMICA (BBOX) ---
+  // --- ESTADO PARA CARGA DINÁMICA (BBOX) ---
   const [mapBounds, setMapBounds] = useState<any>(null)
 
-  // Hook actualizado: ahora pide datos según lo que se ve en el mapa
+  // Hook de Datos: Consulta segura al servidor vía RPC encapsulado en React Query
   const { data: infraData, isLoading: isLoadingInfra } = useInfraestructuras(proyectoId, mapBounds)
 
+  /**
+   * Control maestro de paneles laterales
+   */
   const togglePanel = (panel: 'search' | 'layers' | 'edit') => {
     setShowSearch(panel === 'search' ? !showSearch : false);
     setShowLayers(panel === 'layers' ? !showLayers : false);
@@ -109,23 +113,30 @@ export default function Map({ proyectoId }: Props) {
     }
   };
 
-  // 1. CONFIGURACIÓN DE CAPAS
+  // 1. CARGA DE CONFIGURACIÓN DE CAPAS (RPC)
   useEffect(() => {
     if (!proyectoId) return
     const fetchConfig = async () => {
-      const { data, error } = await supabase.from('v_proyecto_capas_config').select('*').eq('proyecto_id', proyectoId)
+      // Reemplazado por RPC para obtener configuración de capas del proyecto con seguridad
+      const { data, error } = await supabase.rpc('get_proyecto_capas_config', {
+        p_proyecto_id: proyectoId
+      });
+
       if (!error && data) {
-        const nuevasCapas = data.map(d => ({
-          id: d.feature_type_id, nombre: d.capa_nombre, layer: d.capa_codigo, icono: d.capa_icono 
+        const nuevasCapas = data.map((d: any) => ({
+          id: d.feature_type_id, 
+          nombre: d.capa_nombre, 
+          layer: d.capa_codigo, 
+          icono: d.capa_icono 
         }));
         setCapasProyecto(nuevasCapas);
-        setCapasVisibles(nuevasCapas.map(c => c.id));
+        setCapasVisibles(nuevasCapas.map((c: any) => c.id));
       }
     }
     fetchConfig()
   }, [proyectoId, supabase]);
 
-  // 2. FILTRADO Y RESALTADO
+  // 2. APLICACIÓN DE FILTROS EN EL CANVAS
   useEffect(() => {
     if (!mapRef.current || !isMapReady) return;
     const map = mapRef.current;
@@ -152,8 +163,7 @@ export default function Map({ proyectoId }: Props) {
     }
   }, [capasVisibles, idsResaltados, isMapReady]);
 
-  // 3. INICIALIZACIÓN Y EVENTO DE MOVIMIENTO
-  // 3. INICIALIZACIÓN Y EVENTO DE MOVIMIENTO
+  // 3. INICIALIZACIÓN DEL MAPA
   useEffect(() => {
     if (!mapContainer.current || mapRef.current) return
     
@@ -161,25 +171,29 @@ export default function Map({ proyectoId }: Props) {
       const map = new mapboxgl.Map({
         container: mapContainer.current!,
         style: 'mapbox://styles/mapbox/streets-v12',
-        center: coords, zoom: 17, pitch: 45, antialias: true, attributionControl: false
+        center: coords, 
+        zoom: 17, 
+        pitch: 45, 
+        antialias: true, 
+        attributionControl: false
       })
 
       const geolocate = new mapboxgl.GeolocateControl({
         positionOptions: { enableHighAccuracy: true },
-        trackUserLocation: true, showUserHeading: true
+        trackUserLocation: true, 
+        showUserHeading: true
       })
       map.addControl(geolocate)
       geolocateControlRef.current = geolocate
 
-      // Función auxiliar para extraer bounds de forma segura
       const updateBoundsState = (m: mapboxgl.Map) => {
         const b = m.getBounds();
         if (b) {
           const sw = b.getSouthWest();
           const ne = b.getNorthEast();
           setMapBounds({
-            sw: { lng: sw.lng, lat: sw.lat },
-            ne: { lng: ne.lng, lat: ne.lat }
+            sw_lng: sw.lng, sw_lat: sw.lat,
+            ne_lng: ne.lng, ne_lat: ne.lat
           });
         }
       };
@@ -187,12 +201,9 @@ export default function Map({ proyectoId }: Props) {
       map.on('load', () => {
         mapRef.current = map
         setIsMapReady(true)
-
-        // Capturar bounds iniciales al cargar
         updateBoundsState(map);
       })
 
-      // EVENTO CLAVE: Actualizar bounds cuando el usuario deja de mover el mapa
       map.on('moveend', () => {
         updateBoundsState(map);
       });
@@ -206,7 +217,7 @@ export default function Map({ proyectoId }: Props) {
     return () => mapRef.current?.remove()
   }, [])
 
-  // 4. RENDERIZADO DE GEOJSON
+  // 4. MANEJO DE GEOJSON Y CAPAS
   useEffect(() => {
     const map = mapRef.current
     if (!map || !isMapReady || !infraData) return
@@ -223,10 +234,14 @@ export default function Map({ proyectoId }: Props) {
     const geojson: FeatureCollection<Point> = {
       type: 'FeatureCollection',
       features: infraData.map((row: any) => ({
-        type: 'Feature', geometry: row.geometry,
+        type: 'Feature', 
+        geometry: row.geometry,
         properties: { 
-          id: row.id, id_tecnico: row.id_tecnico, capaId: row.feature_type_id,
-          icono: row.capa_icono || 'MapPin', estado: row.estado
+          id: row.id, 
+          id_tecnico: row.id_tecnico, 
+          capaId: row.feature_type_id,
+          icono: row.capa_icono || 'MapPin', 
+          estado: row.estado
         }
       }))
     }
@@ -235,11 +250,13 @@ export default function Map({ proyectoId }: Props) {
       (map.getSource('infra') as mapboxgl.GeoJSONSource).setData(geojson)
     } else {
       map.addSource('infra', { type: 'geojson', data: geojson })
+      
       map.addLayer({
         id: 'infra-highlight', type: 'circle', source: 'infra',
         layout: { 'visibility': 'none' },
         paint: { 'circle-radius': 22, 'circle-color': '#ffffff', 'circle-opacity': 0.8, 'circle-blur': 0.5 }
       })
+
       map.addLayer({
         id: 'infra-bg', type: 'circle', source: 'infra',
         paint: {
@@ -248,10 +265,12 @@ export default function Map({ proyectoId }: Props) {
           'circle-stroke-width': 2, 'circle-stroke-color': '#ffffff'
         }
       })
+
       map.addLayer({
         id: 'infra-layer', type: 'symbol', source: 'infra',
         layout: { 'icon-image': ['get', 'icono'], 'icon-size': 0.55, 'icon-allow-overlap': true }
       })
+
       map.on('click', 'infra-layer', (e) => {
         const feat = e.features?.[0]; if (!feat) return;
         const geom = feat.geometry as Point;
@@ -268,19 +287,29 @@ export default function Map({ proyectoId }: Props) {
     marcadorSelectorRef.current?.remove()
     setCapaSeleccionada(id); setModoEdicion(false); setConfirmandoPosicion(true);
     const centro = mapRef.current.getCenter()
-    marcadorSelectorRef.current = new mapboxgl.Marker({ draggable: true, color: '#ef4444' })
+    marcadorSelectorRef.current = new mapboxgl.Marker({ draggable: true, color: '#3b82f6' })
       .setLngLat(centro).addTo(mapRef.current)
+  }
+
+  const handleConfirmarPosicion = () => {
+    if (!marcadorSelectorRef.current) return
+    const { lng, lat } = marcadorSelectorRef.current.getLngLat()
+    setPuntoSeleccionado({ lng, lat })
+    setConfirmandoPosicion(false)
+    setMostrarFormulario(true)
   }
 
   return (
     <div className="relative w-full h-full bg-slate-100 overflow-hidden">
+      {/* Overlay de Carga */}
       {(!isMapReady || isLoadingInfra) && (
         <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-white/80 backdrop-blur-sm">
           <Loader2 className="animate-spin text-blue-600 mb-2" size={40} />
-          <p className="text-xs font-bold text-slate-500 uppercase tracking-widest text-center">Sincronizando...</p>
+          <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest text-center">Sincronizando Mapas...</p>
         </div>
       )}
 
+      {/* Dock Flotante Inferior */}
       <FloatingDock 
         onZoomIn={handleZoomIn} onZoomOut={handleZoomOut} onLocate={handleLocate}
         onAddElement={() => togglePanel('edit')}
@@ -290,8 +319,10 @@ export default function Map({ proyectoId }: Props) {
         gpsActivo={gpsActivo}
       />
 
+      {/* Control de Capas Lateral */}
       {showLayers && <LayerControl capas={capasProyecto} visibles={capasVisibles} onChange={setCapasVisibles} />}
 
+      {/* Panel de Búsqueda */}
       {showSearch && (
         <SearchPanel 
           proyectoId={proyectoId} capas={capasProyecto}
@@ -318,39 +349,42 @@ export default function Map({ proyectoId }: Props) {
         />
       )}
 
+      {/* Selector de Tipo para Nueva Infraestructura */}
       {modoEdicion && (
-        <div className="absolute top-4 right-20 z-10 bg-white p-4 rounded-xl shadow-2xl w-64 border animate-in fade-in zoom-in">
-          <div className="flex justify-between items-center mb-3">
-            <span className="text-[10px] font-black text-slate-400 uppercase">Nueva Infraestructura</span>
-            <button onClick={() => setModoEdicion(false)}><X size={16} /></button>
+        <div className="absolute top-6 right-6 z-10 bg-white p-6 rounded-[2rem] shadow-2xl w-72 border border-slate-100 animate-in fade-in zoom-in duration-300">
+          <div className="flex justify-between items-center mb-4">
+            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Nueva Planta</span>
+            <button onClick={() => setModoEdicion(false)} className="p-2 hover:bg-slate-50 rounded-full transition-colors"><X size={16} /></button>
           </div>
           <select 
-            className="w-full p-2.5 border rounded-lg text-sm bg-slate-50 text-slate-900 outline-none focus:ring-2 focus:ring-blue-500/20"
+            className="w-full p-4 border border-slate-100 rounded-2xl text-xs font-bold bg-slate-50 text-slate-900 outline-none focus:ring-4 focus:ring-blue-500/10 appearance-none"
             onChange={(e) => handleSeleccionarCapa(e.target.value)}
             value={capaSeleccionada}
           >
-            <option value="">Seleccionar tipo...</option>
+            <option value="">SELECCIONAR TIPO...</option>
             {capasProyecto.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
           </select>
         </div>
       )}
 
+      {/* Confirmación de Ubicación (Marker Draggable) */}
       {confirmandoPosicion && (
-        <div className="absolute bottom-10 left-1/2 -translate-x-1/2 z-20 bg-white p-4 rounded-2xl shadow-2xl border-2 border-blue-500 flex flex-col items-center gap-3 animate-in slide-in-from-bottom-4">
-          <p className="text-sm font-bold text-blue-600 flex items-center gap-2">
-            <Icons.MapPin size={18} /> Arrastre el marcador
-          </p>
-          <div className="flex gap-2">
-            <button onClick={resetearTodo} className="px-4 py-2 text-xs font-bold text-slate-400">CANCELAR</button>
+        <div className="absolute bottom-32 left-1/2 -translate-x-1/2 z-20 bg-slate-900 p-5 rounded-[2.5rem] shadow-2xl border border-slate-800 flex flex-col items-center gap-4 animate-in slide-in-from-bottom-8">
+          <div className="flex items-center gap-3 px-4">
+             <div className="w-2 h-2 bg-blue-500 rounded-full animate-ping" />
+             <p className="text-[10px] font-black text-white uppercase tracking-[0.2em]">Ajustar posición</p>
+          </div>
+          <div className="flex gap-2 w-full">
+            <button onClick={resetearTodo} className="flex-1 px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest hover:text-white transition-colors">Cancelar</button>
             <button 
               onClick={() => {
                 const { lng, lat } = marcadorSelectorRef.current!.getLngLat()
                 setPuntoSeleccionado({ lng, lat }); setMostrarFormulario(true);
                 setConfirmandoPosicion(false); marcadorSelectorRef.current?.remove();
               }}
-              className="px-6 py-2 text-sm font-bold bg-green-600 text-white rounded-xl shadow-lg"
+              className="flex-1 px-8 py-4 text-[10px] font-black bg-blue-600 text-white rounded-[1.5rem] shadow-xl shadow-blue-900/40 uppercase tracking-widest hover:bg-blue-500 transition-all"
             >
-              CONFIRMAR UBICACIÓN
+              Confirmar
             </button>
           </div>
         </div>
@@ -360,11 +394,14 @@ export default function Map({ proyectoId }: Props) {
 
       {mostrarFormulario && puntoSeleccionado && (
         <FormularioDinamico
-          idEdicion={idEdicion} capaId={capaSeleccionada} proyectoId={proyectoId}
-          coordenadas={puntoSeleccionado} onClose={resetearTodo}
-          onSave={() => { 
+          idEdicion={idEdicion}          // Si es null, el RPC sabe que es INSERT
+          capaId={capaSeleccionada} 
+          proyectoId={proyectoId}
+          coordenadas={puntoSeleccionado} // { lng: number, lat: number }
+          onClose={resetearTodo}
+          onSave={() => {
             resetearTodo(); 
-            queryClient.invalidateQueries({ queryKey: ['infraestructuras'] }); 
+            queryClient.invalidateQueries({ queryKey: ['infraestructuras', proyectoId] }); 
           }}
         />
       )}
