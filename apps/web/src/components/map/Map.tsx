@@ -1,7 +1,7 @@
 'use client'
 
 import mapboxgl from 'mapbox-gl'
-import { useEffect, useRef, useState } from 'react'
+import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import { renderToString } from 'react-dom/server'
 import { createClient } from '@/utils/supabase/client'
 import type { FeatureCollection, Point } from 'geojson'
@@ -9,11 +9,12 @@ import { Loader2, X, MapPin } from 'lucide-react'
 import * as Icons from 'lucide-react'
 import 'mapbox-gl/dist/mapbox-gl.css'
 import FormularioDinamico from '@/components/modal/FormularioDinamico'
-import { useInfraestructuras } from '@/hooks/useInfraestructuras'
+import { useInfraestructura } from '@/hooks/useInfraestructuras'
 import { useQueryClient } from '@tanstack/react-query'
 import SearchPanel from './SearchPanel'
 import FloatingDock from './FloatingDock' 
 import LayerControl from './LayerControl'
+import { Infraestructura, MapBounds } from '@/types'
 
 // Configuración de Token
 mapboxgl.accessToken = process.env.NEXT_PUBLIC_MAPBOX_TOKEN!
@@ -22,7 +23,7 @@ interface Props {
   proyectoId: string
 }
 
-export default function Map({ proyectoId }: Props) {
+function MapComponent({ proyectoId }: Props) {
   const queryClient = useQueryClient()
   const mapContainer = useRef<HTMLDivElement | null>(null)
   const mapRef = useRef<mapboxgl.Map | null>(null)
@@ -51,7 +52,8 @@ export default function Map({ proyectoId }: Props) {
   const [mapBounds, setMapBounds] = useState<any>(null)
 
   // Hook de Datos: Consulta segura al servidor vía RPC encapsulado en React Query
-  const { data: infraData, isLoading: isLoadingInfra } = useInfraestructuras(proyectoId, mapBounds)
+  const { useMapa } = useInfraestructura(proyectoId)
+  const { data: infraData = [], isLoading: isLoadingInfra } = useMapa(mapBounds)
 
   /**
    * Control maestro de paneles laterales
@@ -408,3 +410,6 @@ export default function Map({ proyectoId }: Props) {
     </div>
   )
 }
+
+const Map = React.memo(MapComponent)
+export default Map

@@ -1,0 +1,744 @@
+proname,prosrc
+create_org_with_pm_rpc,"
+DECLARE
+    v_org_id UUID;
+BEGIN
+    -- Crear Org
+    INSERT INTO organizaciones (nombre, nit, slug, activo)
+    VALUES (p_nombre, p_nit, p_slug, true)
+    RETURNING id INTO v_org_id;
+
+    -- Upsert del Usuario PM
+    INSERT INTO usuarios (id, nombre, email, organizacion_id, rol_id, activo)
+    VALUES (p_pm_id, p_pm_nombre, p_pm_email, v_org_id, 7, true)
+    ON CONFLICT (id) DO UPDATE SET
+        nombre = EXCLUDED.nombre,
+        organizacion_id = v_org_id,
+        rol_id = 7;
+
+    -- Vincular pm_id en la org
+    UPDATE organizaciones SET pm_id = p_pm_id WHERE id = v_org_id;
+
+    RETURN jsonb_build_object('success', true, 'org_id', v_org_id);
+EXCEPTION WHEN OTHERS THEN
+    RETURN jsonb_build_object('success', false, 'error', SQLERRM);
+END;
+"
+create_org_with_pm_rpc_seguro,"
+DECLARE
+    v_user_rol integer;
+    v_org_id uuid := gen_random_uuid();
+    v_audit_id uuid := gen_random_uuid();
+BEGIN
+    -- Solo admin puede crear organizaciones
+    SELECT u.rol_id 
+    INTO v_user_rol
+    FROM public.usuarios u 
+    WHERE u.id = auth.uid() AND u.activo = true;
+    
+    IF v_user_rol != 1 THEN -- no es admin
+        RETURN QUERY SELECT false, 'No tienes permisos para crear organizaciones', NULL::uuid, NULL::uuid;
+        RETURN;
+    END IF;
+    
+    -- Validar que el PM existe
+    IF NOT EXISTS(SELECT 1 FROM auth.users WHERE id = p_pm_id) THEN
+        RETURN QUERY SELECT false, 'Usuario PM no encontrado', NULL::uuid, NULL::uuid;
+        RETURN;
+    END IF;
+    
+    -- Crear organización
+    INSERT INTO public.organizaciones (
+        id,
+        nombre,
+        nit,
+        slug,
+        plan_id,
+        activo,
+        created_at,
+        updated_at,
+        pm_id
+    ) VALUES (
+        v_org_id,
+        p_nombre,
+        p_nit,
+        p_slug,
+        1, -- plan por defecto
+        true,
+        now(),
+        now(),
+        p_pm_id
+    );
+    
+    -- Actualizar usuario PM
+    INSERT INTO public.usuarios (
+        id,
+        nombre,
+        email,
+        rol_id,
+        organizacion_id
+    ) VALUES (
+        p_pm_id,
+        p_pm_nombre,
+        p_pm_email,
+        7, -- PM role
+        v_org_id
+    ) ON CONFLICT (id) 
+    DO UPDATE SET 
+        organizacion_id = v_org_id,
+        rol_id = 7;
+    
+    -- Auditoría
+    INSERT INTO public.auditoria_borrados (
+        id,
+        tabla_origen, 
+        registro_id, 
+        datos_eliminados, 
+        eliminado_por,
+        eliminado_el
+    ) VALUES (
+        v_audit_id,
+        'organizaciones', 
+        v_org_id, 
+        json_build_object('accion', 'create', 'pm_id', p_pm_id),
+        auth.uid(),
+        now()
+    );
+    
+    RETURN QUERY 
+    SELECT true, 'Organización creada exitosamente', v_org_id, v_audit_id;
+    
+EXCEPTION WHEN OTHERS THEN
+    RETURN QUERY SELECT false, 'Error: ' || SQLERRM, NULL::uuid, NULL::uuid;
+END;
+"
+fn_busqueda_global_infra,"
+  SELECT
+    f.id,
+    f.proyecto_id,
+    f.feature_type_id,
+    f.id_tecnico,
+    f.estado,
+    f.creado_en,
+    f.geom,
+    ft.nombre AS tipo_nombre,
+    ft.icono AS tipo_icono,
+    fa.data AS atributos
+  FROM features f
+  JOIN proyectos p ON p.id = f.proyecto_id
+  JOIN feature_types ft ON ft.id = f.feature_type_id
+  LEFT JOIN feature_attributes fa ON fa.feature_id = f.id
+  WHERE
+    p.organizacion_id = fn_my_org()
+    AND (
+      p_search IS NULL
+      OR (
+        lower(
+          coalesce(f.id_tecnico,'') || ' ' ||
+          coalesce(ft.nombre,'') || ' ' ||
+          coalesce(f.estado,'') || ' ' ||
+          coalesce(
+            (
+              SELECT string_agg(value, ' ')
+              FROM jsonb_each_text(fa.data)
+            ),
+            ''
+          )
+        ) LIKE '%' || lower(p_search) || '%'
+      )
+    );
+"
+fn_delete_feature_photo,"
+DECLARE
+  v_path text;
+BEGIN
+  -- 1️⃣ Validar acceso por organización
+  SELECT fp.storage_path
+  INTO v_path
+  FROM feature_photos fp
+  JOIN features f ON f.id = fp.feature_id
+  JOIN proyectos p ON p.id = f.proyecto_id
+  WHERE fp.id = p_photo_id
+    AND p.organizacion_id = fn_my_org();
+
+  IF v_path IS NULL THEN
+    RAISE EXCEPTION 'Acceso denegado o foto inexistente';
+  END IF;
+
+  -- 2️⃣ Eliminar registro
+  DELETE FROM feature_photos
+  WHERE id = p_photo_id;
+
+  -- 3️⃣ Retornar path para borrar en Storage
+  RETURN v_path;
+END;
+"
+fn_delete_usuario,"
+DECLARE
+    v_my_role integer;
+    v_my_org uuid;
+    v_target_role integer;
+    v_target_org uuid;
+BEGIN
+    -- Obtenemos datos del que ejecuta (quién soy)
+    SELECT rol_id, organizacion_id INTO v_my_role, v_my_org FROM usuarios WHERE id = auth.uid();
+    
+    -- Obtenemos datos del objetivo (a quién quiero borrar)
+    SELECT rol_id, organizacion_id INTO v_target_role, v_target_org FROM usuarios WHERE id = p_usuario_id;
+
+    -- LÓGICA DE JERARQUÍA:
+    -- 1. Si soy Admin Global (4), puedo borrar a cualquiera.
+    IF v_my_role = 4 THEN
+        DELETE FROM usuarios WHERE id = p_usuario_id;
+    
+    -- 2. Si soy PM (7), puedo borrar a alguien de mi misma organización siempre que no sea Admin Global.
+    ELSIF v_my_role = 7 AND v_my_org = v_target_org AND v_target_role != 4 THEN
+        DELETE FROM usuarios WHERE id = p_usuario_id;
+
+    -- 3. Si soy Supervisor (5), puedo borrar solo a Técnicos (6) de mi misma organización.
+    ELSIF v_my_role = 5 AND v_my_org = v_target_org AND v_target_role = 6 THEN
+        DELETE FROM usuarios WHERE id = p_usuario_id;
+
+    ELSE
+        RAISE EXCEPTION 'No tienes permisos suficientes para eliminar a este usuario';
+    END IF;
+END;
+"
+fn_delete_usuario_seguro,"
+DECLARE
+    v_user_org uuid;
+    v_user_rol integer;
+    v_target_org uuid;
+    v_audit_id uuid := gen_random_uuid();
+BEGIN
+    -- Validar usuario actual
+    SELECT u.organizacion_id, u.rol_id 
+    INTO v_user_org, v_user_rol
+    FROM public.usuarios u 
+    WHERE u.id = auth.uid() AND u.activo = true;
+    
+    IF v_user_org IS NULL THEN
+        RETURN QUERY SELECT false, 'Usuario no válido', NULL::uuid;
+        RETURN;
+    END IF;
+    
+    -- Validar usuario a eliminar
+    SELECT organizacion_id
+    INTO v_target_org
+    FROM public.usuarios 
+    WHERE id = p_usuario_id;
+    
+    IF v_target_org IS NULL THEN
+        RETURN QUERY SELECT false, 'Usuario no encontrado', NULL::uuid;
+        RETURN;
+    END IF;
+    
+    -- Validar permisos (admin o misma organización)
+    IF v_user_rol != 1 AND v_user_org != v_target_org THEN
+        RETURN QUERY SELECT false, 'No tienes permisos para eliminar este usuario', NULL::uuid;
+        RETURN;
+    END IF;
+    
+    -- No permitir autoeliminación
+    IF p_usuario_id = auth.uid() THEN
+        RETURN QUERY SELECT false, 'No puedes eliminar tu propio usuario', NULL::uuid;
+        RETURN;
+    END IF;
+    
+    -- Soft delete
+    UPDATE public.usuarios
+    SET activo = false
+    WHERE id = p_usuario_id;
+    
+    -- Auditoría
+    INSERT INTO public.auditoria_borrados (
+        id,
+        tabla_origen, 
+        registro_id, 
+        datos_eliminados, 
+        eliminado_por,
+        eliminado_el
+    ) VALUES (
+        v_audit_id,
+        'usuarios', 
+        p_usuario_id, 
+        json_build_object('accion', 'soft_delete'),
+        auth.uid(),
+        now()
+    );
+    
+    RETURN QUERY SELECT true, 'Usuario eliminado exitosamente', v_audit_id;
+END;
+"
+fn_feature_delete,"
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM features f
+    JOIN proyectos p ON p.id = f.proyecto_id
+    WHERE f.id = p_feature_id
+      AND p.organizacion_id = fn_my_org()
+  ) THEN
+    RAISE EXCEPTION 'Acceso denegado';
+  END IF;
+
+  UPDATE features
+  SET deleted = true
+  WHERE id = p_feature_id;
+END;
+"
+fn_feature_photos_signed,"
+BEGIN
+  RETURN QUERY
+  SELECT
+    fp.id,
+    storage.create_signed_url(fp.storage_path, 3600) AS signed_url,
+    fp.descripcion,
+    fp.creado_en
+  FROM feature_photos fp
+  JOIN features f ON f.id = fp.feature_id
+  JOIN proyectos p ON p.id = f.proyecto_id
+  WHERE
+    fp.feature_id = p_feature_id
+    AND p.organizacion_id = fn_my_org();
+END;
+"
+fn_generar_id_tecnico,"
+DECLARE
+    v_num INTEGER;
+    v_nombre_tipo TEXT;
+    v_id_propuesto TEXT;
+    v_existe BOOLEAN;
+BEGIN
+    -- 1. Forzar a NULL si viene vacío para que el trigger actúe
+    IF NEW.id_tecnico IS NULL OR TRIM(NEW.id_tecnico) = '' THEN
+        
+        -- 2. Obtener prefijo (Primeras 3 letras de la capa)
+        SELECT UPPER(SUBSTRING(nombre FROM 1 FOR 3)) INTO v_nombre_tipo 
+        FROM public.feature_types 
+        WHERE id = NEW.feature_type_id;
+
+        -- 3. Bucle de seguridad para evitar duplicados
+        -- Empezamos con el número que nos dé la secuencia
+        v_num := public.get_next_infra_seq(NEW.proyecto_id, NEW.feature_type_id);
+        
+        LOOP
+            v_id_propuesto := v_nombre_tipo || '-' || LPAD(v_num::text, 3, '0');
+            
+            -- ¿Ya existe este ID en este proyecto?
+            SELECT EXISTS (
+                SELECT 1 FROM public.features 
+                WHERE proyecto_id = NEW.proyecto_id 
+                AND id_tecnico = v_id_propuesto
+            ) INTO v_existe;
+
+            -- Si no existe, rompemos el bucle y usamos este
+            IF NOT v_existe THEN
+                EXIT;
+            END IF;
+
+            -- Si existe, probamos con el siguiente número
+            v_num := v_num + 1;
+        END LOOP;
+
+        NEW.id_tecnico := v_id_propuesto;
+    END IF;
+    
+    RETURN NEW;
+END;
+"
+fn_insert_feature_photo,"
+DECLARE
+  v_photo_id uuid;
+BEGIN
+  -- 1️⃣ Validar que el feature pertenece a mi organización
+  IF NOT EXISTS (
+    SELECT 1
+    FROM features f
+    JOIN proyectos p ON p.id = f.proyecto_id
+    WHERE f.id = p_feature_id
+      AND p.organizacion_id = fn_my_org()
+  ) THEN
+    RAISE EXCEPTION 'Acceso denegado al feature';
+  END IF;
+
+  -- 2️⃣ Insertar la foto
+  INSERT INTO feature_photos (
+    feature_id,
+    storage_path,
+    descripcion,
+    creado_por
+  )
+  VALUES (
+    p_feature_id,
+    p_storage_path,
+    p_descripcion,
+    auth.uid()
+  )
+  RETURNING id INTO v_photo_id;
+
+  RETURN v_photo_id;
+END;
+"
+fn_mapa_infra,"
+  SELECT
+    f.id,
+    f.proyecto_id,
+    f.feature_type_id,
+    ft.nombre AS tipo_nombre,
+    ft.icono  AS tipo_icono,
+    f.estado,
+    f.geom
+  FROM features f
+  JOIN feature_types ft ON ft.id = f.feature_type_id
+  JOIN proyectos p ON p.id = f.proyecto_id
+  WHERE
+    p.organizacion_id = fn_my_org()
+    AND f.geom && ST_MakeEnvelope(xmin, ymin, xmax, ymax, 4326);
+"
+fn_my_role,"
+    SELECT rol_id FROM public.usuarios WHERE id = auth.uid();
+"
+fn_save_usuario,"
+DECLARE
+    v_my_role integer;
+    v_result_id uuid;
+BEGIN
+    SELECT rol_id INTO v_my_role FROM usuarios WHERE id = auth.uid();
+    
+    -- Validar que solo Admin Global (4) o PM (7) puedan crear/editar
+    IF v_my_role NOT IN (4, 7) THEN
+        RAISE EXCEPTION 'No tienes permisos para gestionar usuarios';
+    END IF;
+
+    IF p_id_edicion IS NULL THEN
+        -- INSERTAR (El trigger fn_sync_usuario_auth debería manejar la vinculación con Auth)
+        INSERT INTO usuarios (nombre, email, rol_id, organizacion_id)
+        VALUES (p_nombre, p_email, p_rol_id, p_organizacion_id)
+        RETURNING id INTO v_result_id;
+    ELSE
+        -- ACTUALIZAR
+        UPDATE usuarios 
+        SET nombre = p_nombre, rol_id = p_rol_id
+        WHERE id = p_id_edicion
+        RETURNING id INTO v_result_id;
+    END IF;
+
+    RETURN jsonb_build_object('success', true, 'id', v_result_id);
+END;
+"
+fn_save_usuario_seguro,"
+DECLARE
+    v_user_org uuid;
+    v_user_rol integer;
+    v_usuario_id uuid := COALESCE(p_id_edicion, gen_random_uuid());
+    v_is_edit boolean := (p_id_edicion IS NOT NULL);
+BEGIN
+    -- Validar usuario actual
+    SELECT u.organizacion_id, u.rol_id 
+    INTO v_user_org, v_user_rol
+    FROM public.usuarios u 
+    WHERE u.id = auth.uid() AND u.activo = true;
+    
+    IF v_user_org IS NULL THEN
+        RETURN QUERY SELECT false, 'Usuario no válido', NULL::uuid;
+        RETURN;
+    END IF;
+    
+    -- Validar permisos
+    IF v_user_rol NOT IN (1) AND v_user_org != p_organizacion_id THEN
+        RETURN QUERY SELECT false, 'No tienes permisos para esta organización', NULL::uuid;
+        RETURN;
+    END IF;
+    
+    -- Validar que la organización existe y pertenece al usuario actual
+    IF NOT EXISTS(
+        SELECT 1 FROM public.organizaciones o 
+        WHERE o.id = p_organizacion_id 
+          AND (v_user_rol = 1 OR o.id = v_user_org)
+    ) THEN
+        RETURN QUERY SELECT false, 'Organización no válida', NULL::uuid;
+        RETURN;
+    END IF;
+    
+    -- Ejecutar operación
+    IF v_is_edit THEN
+        -- Actualizar
+        UPDATE public.usuarios
+        SET 
+            nombre = p_nombre,
+            email = p_email,
+            rol_id = p_rol_id,
+            organizacion_id = p_organizacion_id
+        WHERE id = p_id_edicion;
+        
+        IF NOT FOUND THEN
+            RETURN QUERY SELECT false, 'Usuario no encontrado', NULL::uuid;
+            RETURN;
+        END IF;
+    ELSE
+        -- Insertar
+        INSERT INTO public.usuarios (
+            id,
+            nombre,
+            email,
+            rol_id,
+            organizacion_id
+        ) VALUES (
+            v_usuario_id,
+            p_nombre,
+            p_email,
+            p_rol_id,
+            p_organizacion_id
+        );
+    END IF;
+    
+    RETURN QUERY 
+    SELECT true, 
+           'Usuario ' || CASE WHEN v_is_edit THEN 'actualizado' ELSE 'creado' END || ' exitosamente',
+           v_usuario_id;
+END;
+"
+fn_sync_usuario_auth,"
+BEGIN
+  INSERT INTO public.usuarios (
+    id,
+    email,
+    rol_id,
+    organizacion_id,
+    creado_en
+  )
+  VALUES (
+    NEW.id,
+    NEW.email,
+    1, -- rol por defecto (usuario)
+    NULL, -- luego se asigna
+    now()
+  );
+
+  RETURN NEW;
+END;
+"
+fn_toggle_usuario_activo,"
+DECLARE
+    v_user_org uuid;
+    v_user_rol integer;
+    v_target_org uuid;
+BEGIN
+    -- Validar usuario actual
+    SELECT u.organizacion_id, u.rol_id 
+    INTO v_user_org, v_user_rol
+    FROM public.usuarios u 
+    WHERE u.id = auth.uid() AND u.activo = true;
+    
+    IF v_user_org IS NULL THEN
+        RETURN QUERY SELECT false, 'Usuario no válido';
+        RETURN;
+    END IF;
+    
+    -- Validar usuario a modificar
+    SELECT organizacion_id
+    INTO v_target_org
+    FROM public.usuarios 
+    WHERE id = p_usuario_id;
+    
+    IF v_target_org IS NULL THEN
+        RETURN QUERY SELECT false, 'Usuario no encontrado';
+        RETURN;
+    END IF;
+    
+    -- Validar permisos
+    IF v_user_rol != 1 AND v_user_org != v_target_org THEN
+        RETURN QUERY SELECT false, 'No tienes permisos para modificar este usuario';
+        RETURN;
+    END IF;
+    
+    -- No permitir auto-modificación
+    IF p_usuario_id = auth.uid() THEN
+        RETURN QUERY SELECT false, 'No puedes modificar tu propio estado';
+        RETURN;
+    END IF;
+    
+    -- Actualizar estado
+    UPDATE public.usuarios
+    SET activo = p_estado
+    WHERE id = p_usuario_id;
+    
+    RETURN QUERY SELECT true, 'Estado actualizado exitosamente';
+END;
+"
+fn_validar_limite_usuarios,"
+DECLARE
+    v_max_permitido int;
+    v_actuales int;
+    v_plan_nombre text;
+BEGIN
+    -- 1. Si es SuperAdmin (4), saltar validación
+    IF (SELECT rol_id FROM usuarios WHERE id = auth.uid()) = 4 THEN
+        RETURN NEW;
+    END IF;
+
+    -- 2. Obtener el límite del plan de la organización
+    SELECT p.max_usuarios, p.nombre 
+    INTO v_max_permitido, v_plan_nombre
+    FROM public.organizaciones o
+    JOIN public.planes p ON o.plan_id = p.id
+    WHERE o.id = NEW.organizacion_id;
+
+    -- 3. Contar usuarios activos actuales de esa organización
+    SELECT COUNT(*) INTO v_actuales 
+    FROM public.usuarios 
+    WHERE organizacion_id = NEW.organizacion_id AND activo = true;
+
+    -- 4. Validar
+    IF v_actuales >= v_max_permitido THEN
+        RAISE EXCEPTION 'Límite de usuarios alcanzado para el plan %. Máximo permitido: %', v_plan_nombre, v_max_permitido;
+    END IF;
+
+    RETURN NEW;
+END;
+"
+get_feature_detallado_rpc,"
+DECLARE
+    v_user_role integer;
+    v_user_org uuid;
+BEGIN
+    SELECT u.rol_id, u.organizacion_id INTO v_user_role, v_user_org 
+    FROM usuarios u 
+    WHERE u.id = auth.uid();
+
+    RETURN QUERY
+    SELECT 
+        f.id, f.id_tecnico, f.proyecto_id, f.feature_type_id,
+        fa.data AS atributos, f.creado_en,
+        COALESCE(
+            (SELECT jsonb_agg(jsonb_build_object(
+                'id', fp.id, 
+                'storage_path', fp.storage_path,
+                'descripcion', fp.descripcion
+            ))
+             FROM feature_photos fp WHERE fp.feature_id = f.id),
+            '[]'::jsonb
+        ) AS fotos
+    FROM features f
+    LEFT JOIN feature_attributes fa ON f.id = fa.feature_id
+    JOIN proyectos p ON f.proyecto_id = p.id
+    WHERE f.id = p_feature_id
+    AND (
+        v_user_role = 4 OR -- Administrador Global bypass
+        p.organizacion_id = v_user_org -- Resto de roles filtrados
+    );
+END;
+"
+get_mi_perfil_seguro,"
+BEGIN
+    RETURN QUERY
+    SELECT 
+        u.id,
+        u.id as user_id,
+        u.email,
+        u.rol_id,
+        r.nombre as rol_nombre,
+        u.organizacion_id,
+        o.nombre as organizacion_nombre,
+        u.activo,
+        u.nombre
+    FROM public.usuarios u
+    LEFT JOIN public.roles r ON r.id = u.rol_id
+    LEFT JOIN public.organizaciones o ON o.id = u.organizacion_id
+    WHERE u.id = auth.uid()
+      AND u.activo = true;
+END;
+"
+get_proyectos_seguros,"
+DECLARE
+    v_user_org uuid;
+    v_user_rol integer;
+BEGIN
+    -- Validar usuario
+    SELECT u.organizacion_id, u.rol_id 
+    INTO v_user_org, v_user_rol
+    FROM public.usuarios u 
+    WHERE u.id = auth.uid() AND u.activo = true;
+    
+    IF v_user_org IS NULL THEN
+        RAISE EXCEPTION 'Usuario no válido';
+    END IF;
+    
+    -- Si es admin, ver todas; si no, solo las de su organización
+    IF v_user_rol = 1 THEN
+        RETURN QUERY
+        SELECT 
+            p.id,
+            p.nombre,
+            p.organizacion_id,
+            p.entidad,
+            p.region,
+            p.estado,
+            p.created_at,
+            p.fase_actual,
+            (SELECT count(*) FROM public.features f WHERE f.proyecto_id = p.id AND f.deleted = false) as infraestructuras_count
+        FROM public.proyectos p
+        ORDER BY p.created_at DESC;
+    ELSE
+        RETURN QUERY
+        SELECT 
+            p.id,
+            p.nombre,
+            p.organizacion_id,
+            p.entidad,
+            p.region,
+            p.estado,
+            p.created_at,
+            p.fase_actual,
+            (SELECT count(*) FROM public.features f WHERE f.proyecto_id = p.id AND f.deleted = false) as infraestructuras_count
+        FROM public.proyectos p
+        WHERE p.organizacion_id = v_user_org
+        ORDER BY p.created_at DESC;
+    END IF;
+END;
+"
+get_usuarios_seguros_v2,"
+DECLARE
+    v_user_org uuid;
+    v_user_rol integer;
+BEGIN
+    -- Obtener organización del usuario actual
+    SELECT u.organizacion_id, u.rol_id 
+    INTO v_user_org, v_user_rol
+    FROM public.usuarios u 
+    WHERE u.id = auth.uid() AND u.activo = true;
+    
+    IF v_user_org IS NULL THEN
+        RAISE EXCEPTION 'Usuario no válido';
+    END IF;
+    
+    -- Solo admin puede ver todos, otros solo ven su organización
+    IF v_user_rol != 1 THEN -- 1 = admin
+        RETURN QUERY
+        SELECT 
+            u.id,
+            u.nombre,
+            u.email,
+            u.rol_id,
+            u.organizacion_id,
+            u.activo,
+            u.created_at
+        FROM public.usuarios u
+        WHERE u.organizacion_id = v_user_org
+        ORDER BY u.created_at DESC;
+    ELSE
+        RETURN QUERY
+        SELECT 
+            u.id,
+            u.nombre,
+            u.email,
+            u.rol_id,
+            u.organizacion_id,
+            u.activo,
+            u.created_at
+        FROM public.usuarios u
+        ORDER BY u.created_at DESC;
+    END IF;
+END;
+"

@@ -2,6 +2,7 @@
 
 import { createClient } from '@supabase/supabase-js'
 import { revalidatePath } from 'next/cache'
+import { validateAndFormatInfrastructure, isValidUUID } from '@/utils/security'
 
 // Service Role: Crucial para validaciones espaciales y triggers complejos
 const supabaseAdmin = createClient(
@@ -10,7 +11,7 @@ const supabaseAdmin = createClient(
 )
 
 /**
- * GUARDAR INFRAESTRUCTURA (CREAR O EDITAR)
+ * GUARDAR INFRAESTRUCTURA (CREAR O EDITAR) - VERSIÓN MEJORADA
  * Centraliza la lógica de puntos (Postes, Cámaras, etc.) con validación PostGIS.
  */
 export async function saveInfraestructura(payload: {
@@ -22,24 +23,36 @@ export async function saveInfraestructura(payload: {
   idEdicion?: string 
 }) {
   try {
-    // 1. Conversión a WKT para que PostGIS lo entienda como GEOMETRY
-    const wktGeom = `POINT(${payload.longitud} ${payload.latitud})`;
+    // 0. Validación estricta de inputs usando utilidades de seguridad
+    const validation = validateAndFormatInfrastructure(payload);
+    if (!validation.isValid) {
+      return { error: `Validación fallida: ${validation.errors.join(', ')}` };
+    }
 
-    // 2. Llamada al RPC maestro de infraestructura
+    // 1. Usar datos sanitizados
+    const sanitized = validation.sanitized;
+    
+    // 2. Conversión a WKT para que PostGIS lo entienda como GEOMETRY
+    const wktGeom = `POINT(${sanitized.longitud} ${sanitized.latitud})`;
+
+    // 3. Llamada al RPC maestro de infraestructura (versión segura)
     const { data: result, error: rpcError } = await supabaseAdmin.rpc(
-      'guardar_infraestructura_completa',
+      'guardar_infraestructura_completa_segura',
       {
-        p_proyecto_id: payload.proyectoId,
-        p_feature_type_id: payload.featureTypeId,
+        p_proyecto_id: sanitized.proyectoId,
+        p_feature_type_id: sanitized.featureTypeId,
         p_geom: wktGeom,
-        p_atributos: payload.atributos,
-        p_id_edicion: payload.idEdicion || null
+        p_atributos: sanitized.atributos,
+        p_id_edicion: sanitized.idEdicion
       }
     );
 
-    if (rpcError) throw rpcError;
+    if (rpcError) {
+      console.error("Error RPC en saveInfraestructura:", rpcError);
+      return { error: "Error en la operación de base de datos" };
+    }
 
-    // 3. Revalidación de caché de Next.js
+    // 5. Revalidación de caché de Next.js
     revalidatePath('/dashboard/mapa');
     revalidatePath(`/dashboard/proyectos/${payload.proyectoId}`);
 
@@ -50,42 +63,92 @@ export async function saveInfraestructura(payload: {
 
   } catch (error: any) {
     console.error("Error en saveInfraestructura:", error.message);
+    
+    // No exponer detalles de errores internos en producción
+    if (process.env.NODE_ENV === 'production') {
+      return { error: "Error al procesar la solicitud" };
+    }
+    
     return { error: error.message || "Error al procesar los datos geográficos" };
   }
 }
 
 /**
- * ELIMINAR ELEMENTO DE INFRAESTRUCTURA
+ * ELIMINAR ELEMENTO DE INFRAESTRUCTURA - VERSIÓN MEJORADA
  */
 export async function deleteInfraestructura(featureId: string, proyectoId: string) {
   try {
-    const { error } = await supabaseAdmin.rpc('fn_feature_delete', {
+    // Validación de UUID
+    if (!isValidUUID(featureId)) {
+      return { error: "ID de feature inválido" };
+    }
+
+    // Usar función RPC segura con auditoría
+    const { data: result, error } = await supabaseAdmin.rpc('fn_feature_delete_segura', {
       p_feature_id: featureId
     });
 
-    if (error) throw error;
+    if (error) {
+      console.error("Error RPC en deleteInfraestructura:", error);
+      return { error: "Error al eliminar el elemento" };
+    }
+
+    // Verificar que la operación fue exitosa
+    if (result && result.success === false) {
+      return { error: result.error || "Error en la operación" };
+    }
 
     revalidatePath('/dashboard/mapa');
     revalidatePath(`/dashboard/proyectos/${proyectoId}`);
     
-    return { success: true };
+    return { success: true, auditLog: result?.audit_id };
   } catch (error: any) {
+    console.error("Error en deleteInfraestructura:", error.message);
+    
+    if (process.env.NODE_ENV === 'production') {
+      return { error: "Error al procesar la solicitud" };
+    }
+    
     return { error: error.message };
   }
 }
 
 /**
- * OBTENER FOTOS (Vía RPC de seguridad)
+ * OBTENER FOTOS (Vía RPC de seguridad) - VERSIÓN MEJORADA
  */
 export async function getFeaturePhotos(featureId: string) {
   try {
-    const { data, error } = await supabaseAdmin.rpc('fn_feature_photos_signed', {
+    // Validación de UUID
+    if (!isValidUUID(featureId)) {
+      return { error: "ID de feature inválido" };
+    }
+
+    // Usar función RPC segura con validación de paths
+    const { data, error } = await supabaseAdmin.rpc('fn_feature_photos_signed_segura', {
       p_feature_id: featureId
     });
 
-    if (error) throw error;
-    return { success: true, photos: data };
+    if (error) {
+      console.error("Error RPC en getFeaturePhotos:", error);
+      return { error: "Error al obtener las fotos" };
+    }
+
+    // Validar que los datos devueltos sean seguros
+    const photos = Array.isArray(data) ? data.filter(photo => 
+      photo && 
+      typeof photo.id === 'string' && 
+      typeof photo.signed_url === 'string' &&
+      photo.signed_url.startsWith('https://')
+    ) : [];
+
+    return { success: true, photos };
   } catch (error: any) {
+    console.error("Error en getFeaturePhotos:", error.message);
+    
+    if (process.env.NODE_ENV === 'production') {
+      return { error: "Error al procesar la solicitud" };
+    }
+    
     return { error: error.message };
   }
 }

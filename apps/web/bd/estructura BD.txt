@@ -1,0 +1,180 @@
+-- WARNING: This schema is for context only and is not meant to be run.
+-- Table order and constraints may not be valid for execution.
+
+CREATE TABLE public.attribute_definitions (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  feature_type_id uuid,
+  campo text NOT NULL,
+  tipo text NOT NULL,
+  requerido boolean DEFAULT false,
+  opciones jsonb,
+  orden integer,
+  visible_en_fase text DEFAULT 'ambas'::text,
+  solo_lectura_en_construccion boolean DEFAULT false,
+  CONSTRAINT attribute_definitions_pkey PRIMARY KEY (id),
+  CONSTRAINT attribute_definitions_feature_type_id_fkey FOREIGN KEY (feature_type_id) REFERENCES public.feature_types(id)
+);
+CREATE TABLE public.auditoria_accesos (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  usuario_id uuid,
+  accion text NOT NULL,
+  recurso text NOT NULL,
+  ip_address inet,
+  user_agent text,
+  exito boolean DEFAULT true,
+  detalles jsonb,
+  creado_en timestamp with time zone DEFAULT now(),
+  CONSTRAINT auditoria_accesos_pkey PRIMARY KEY (id),
+  CONSTRAINT auditoria_accesos_usuario_id_fkey FOREIGN KEY (usuario_id) REFERENCES auth.users(id)
+);
+CREATE TABLE public.auditoria_borrados (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  tabla_origen text NOT NULL,
+  registro_id uuid,
+  datos_eliminados jsonb,
+  eliminado_por uuid,
+  eliminado_el timestamp with time zone DEFAULT now(),
+  CONSTRAINT auditoria_borrados_pkey PRIMARY KEY (id),
+  CONSTRAINT auditoria_borrados_eliminado_por_fkey FOREIGN KEY (eliminado_por) REFERENCES auth.users(id)
+);
+CREATE TABLE public.feature_attributes (
+  feature_id uuid NOT NULL,
+  data jsonb,
+  CONSTRAINT feature_attributes_pkey PRIMARY KEY (feature_id),
+  CONSTRAINT feature_attributes_feature_id_fkey FOREIGN KEY (feature_id) REFERENCES public.features(id)
+);
+CREATE TABLE public.feature_photos (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  feature_id uuid,
+  storage_path text NOT NULL,
+  descripcion text,
+  creado_por uuid,
+  creado_en timestamp with time zone DEFAULT now(),
+  CONSTRAINT feature_photos_pkey PRIMARY KEY (id),
+  CONSTRAINT feature_photos_creado_por_fkey FOREIGN KEY (creado_por) REFERENCES public.usuarios(id),
+  CONSTRAINT feature_photos_feature_id_fkey FOREIGN KEY (feature_id) REFERENCES public.features(id)
+);
+CREATE TABLE public.feature_types (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  nombre text NOT NULL,
+  requiere_padre boolean DEFAULT false,
+  icono text DEFAULT 'MapPin'::text,
+  layer_id uuid,
+  organizacion_id uuid,
+  CONSTRAINT feature_types_pkey PRIMARY KEY (id),
+  CONSTRAINT feature_types_layer_id_fkey FOREIGN KEY (layer_id) REFERENCES public.layers(id),
+  CONSTRAINT feature_types_organizacion_id_fkey FOREIGN KEY (organizacion_id) REFERENCES public.organizaciones(id)
+);
+CREATE TABLE public.features (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  proyecto_id uuid,
+  feature_type_id uuid,
+  geom USER-DEFINED NOT NULL,
+  estado text DEFAULT 'preliminar'::text CHECK (estado = ANY (ARRAY['PENDIENTE'::text, 'VALIDADO'::text, 'PROYECTADO'::text, 'EJECUTADO'::text])),
+  creado_por uuid,
+  creado_en timestamp with time zone DEFAULT now(),
+  actualizado_en timestamp with time zone,
+  id_tecnico text,
+  deleted boolean DEFAULT false,
+  CONSTRAINT features_pkey PRIMARY KEY (id),
+  CONSTRAINT features_creado_por_fkey FOREIGN KEY (creado_por) REFERENCES public.usuarios(id),
+  CONSTRAINT features_feature_type_id_fkey FOREIGN KEY (feature_type_id) REFERENCES public.feature_types(id),
+  CONSTRAINT features_proyecto_id_fkey FOREIGN KEY (proyecto_id) REFERENCES public.proyectos(id)
+);
+CREATE TABLE public.layers (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  nombre_tecnico text NOT NULL UNIQUE,
+  descripcion text,
+  organizacion_id uuid,
+  CONSTRAINT layers_pkey PRIMARY KEY (id),
+  CONSTRAINT layers_organizacion_id_fkey FOREIGN KEY (organizacion_id) REFERENCES public.organizaciones(id)
+);
+CREATE TABLE public.organizaciones (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  nombre text NOT NULL,
+  plan_id integer,
+  creada_en timestamp with time zone DEFAULT now(),
+  activo boolean DEFAULT true,
+  slug text UNIQUE,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  nit text,
+  pm_id uuid,
+  CONSTRAINT organizaciones_pkey PRIMARY KEY (id),
+  CONSTRAINT organizaciones_plan_id_fkey FOREIGN KEY (plan_id) REFERENCES public.planes(id),
+  CONSTRAINT organizaciones_pm_id_fkey FOREIGN KEY (pm_id) REFERENCES public.usuarios(id)
+);
+CREATE TABLE public.permisos_rol (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  organizacion_id uuid,
+  rol_id integer,
+  modulo text NOT NULL,
+  accion text NOT NULL,
+  permitido boolean DEFAULT false,
+  CONSTRAINT permisos_rol_pkey PRIMARY KEY (id),
+  CONSTRAINT permisos_rol_organizacion_id_fkey FOREIGN KEY (organizacion_id) REFERENCES public.organizaciones(id),
+  CONSTRAINT permisos_rol_rol_id_fkey FOREIGN KEY (rol_id) REFERENCES public.roles(id)
+);
+CREATE TABLE public.planes (
+  id integer NOT NULL DEFAULT nextval('planes_id_seq'::regclass),
+  nombre text NOT NULL,
+  max_usuarios integer NOT NULL,
+  permite_carga_masiva boolean DEFAULT false,
+  permite_descarga_csv boolean DEFAULT false,
+  modulos_habilitados jsonb DEFAULT '["proyectos", "mapa"]'::jsonb,
+  CONSTRAINT planes_pkey PRIMARY KEY (id)
+);
+CREATE TABLE public.proyecto_capas (
+  proyecto_id uuid NOT NULL,
+  feature_type_id uuid NOT NULL,
+  CONSTRAINT proyecto_capas_pkey PRIMARY KEY (proyecto_id, feature_type_id),
+  CONSTRAINT proyecto_capas_feature_type_id_fkey FOREIGN KEY (feature_type_id) REFERENCES public.feature_types(id),
+  CONSTRAINT proyecto_capas_proyecto_id_fkey FOREIGN KEY (proyecto_id) REFERENCES public.proyectos(id)
+);
+CREATE TABLE public.proyecto_tecnicos (
+  proyecto_id uuid NOT NULL,
+  tecnico_id uuid NOT NULL,
+  CONSTRAINT proyecto_tecnicos_pkey PRIMARY KEY (proyecto_id, tecnico_id),
+  CONSTRAINT proyecto_tecnicos_tecnico_id_fkey FOREIGN KEY (tecnico_id) REFERENCES public.usuarios(id),
+  CONSTRAINT proyecto_tecnicos_proyecto_id_fkey FOREIGN KEY (proyecto_id) REFERENCES public.proyectos(id)
+);
+CREATE TABLE public.proyectos (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  nombre text NOT NULL,
+  entidad text,
+  region text,
+  supervisor_id uuid,
+  estado text DEFAULT 'activo'::text,
+  created_at timestamp with time zone DEFAULT now(),
+  organizacion_id uuid,
+  fase_actual text DEFAULT 'replanteo'::text,
+  CONSTRAINT proyectos_pkey PRIMARY KEY (id),
+  CONSTRAINT proyectos_supervisor_id_fkey FOREIGN KEY (supervisor_id) REFERENCES public.usuarios(id),
+  CONSTRAINT proyectos_organizacion_id_fkey FOREIGN KEY (organizacion_id) REFERENCES public.organizaciones(id)
+);
+CREATE TABLE public.roles (
+  id integer NOT NULL DEFAULT nextval('roles_id_seq'::regclass),
+  nombre text NOT NULL UNIQUE,
+  CONSTRAINT roles_pkey PRIMARY KEY (id)
+);
+CREATE TABLE public.spatial_ref_sys (
+  srid integer NOT NULL CHECK (srid > 0 AND srid <= 998999),
+  auth_name character varying,
+  auth_srid integer,
+  srtext character varying,
+  proj4text character varying,
+  CONSTRAINT spatial_ref_sys_pkey PRIMARY KEY (srid)
+);
+CREATE TABLE public.usuarios (
+  id uuid NOT NULL,
+  nombre text NOT NULL,
+  email text NOT NULL,
+  rol_id integer,
+  activo boolean DEFAULT true,
+  created_at timestamp with time zone DEFAULT now(),
+  organizacion_id uuid,
+  CONSTRAINT usuarios_pkey PRIMARY KEY (id),
+  CONSTRAINT usuarios_id_fkey FOREIGN KEY (id) REFERENCES auth.users(id),
+  CONSTRAINT usuarios_rol_id_fkey FOREIGN KEY (rol_id) REFERENCES public.roles(id),
+  CONSTRAINT usuarios_organizacion_id_fkey FOREIGN KEY (organizacion_id) REFERENCES public.organizaciones(id)
+);

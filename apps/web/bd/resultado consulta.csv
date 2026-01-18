@@ -1,0 +1,2 @@
+id,nombre,email,rol_id,rol_nombre,activo,tiene_permisos_admin
+862a29e2-ef6e-4814-8990-9b1f58264445,Johan Trujillo,Stivel275@gmail.com,4,Administrador Global,true,Es Admin Global

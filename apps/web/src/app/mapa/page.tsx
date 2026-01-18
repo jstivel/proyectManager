@@ -2,9 +2,15 @@
 'use client'
 
 import { useSearchParams } from 'next/navigation'
-import Map from '@/components/map/Map'
+import dynamic from 'next/dynamic'
 import { Loader2 } from 'lucide-react'
 import { Suspense } from 'react'
+import MapLoader from '@/components/map/MapLoader'
+
+const Map = dynamic(() => import('@/components/map/Map'), {
+  loading: () => <MapLoader message="Preparando mapa interactiva..." />,
+  ssr: false
+})
 
 function MapaContent() {
   const searchParams = useSearchParams()

@@ -4,6 +4,21 @@ import Sidebar from "@/components/layout/Sidebar";
 import Header from "@/components/layout/Header";
 import { ShieldAlert, LogOut, RefreshCw } from "lucide-react"; 
 import { logoutAction } from "@/app/login/actions";
+import { User, UserProfile } from "@/types";
+
+function checkIsSuperAdmin(user: User | null, perfil: UserProfile | null): boolean {
+  if (!user) return false;
+  
+  // Verificar por rol_id (método principal)
+  if (perfil?.rol_id === 4) return true;
+  
+  // Verificar por metadata (fallback)
+  if (user.user_metadata?.super_admin === true) return true;
+  
+  // Verificar por email específico (temporal, para migración)
+  const adminEmails = ['stivel275@gmail.com', 'admin@replanteo.com'];
+  return adminEmails.includes(user.email || '');
+}
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const supabase = await createClient();
@@ -24,9 +39,9 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
   /**
    * 3. Lógica de Bypass y Permisos (Sincronizada con Proxy)
-   * SuperAdmin es Rol 4 (Johan Trujillo)
+   * SuperAdmin es Rol 4
    */
-  const isSuperAdmin = user.email === 'stivel275@gmail.com' || perfil?.rol_id === 4;
+  const isSuperAdmin = checkIsSuperAdmin(user, perfil);
   
   /**
    * 4. Validación de Acceso

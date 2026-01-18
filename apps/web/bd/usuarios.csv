@@ -1,0 +1,6 @@
+id,nombre,email,rol_id,activo,created_at,organizacion_id
+0ce8a496-f76d-4196-a36d-607066176f95,Cristian Rosero,cristian@gmail.com,5,true,2026-01-03 06:00:05.695489+00,
+61b53da4-1122-4eb5-a4dc-62a00a2fc083,William cortes,willcortes@dico.com,6,true,2026-01-03 06:00:39.525365+00,
+862a29e2-ef6e-4814-8990-9b1f58264445,Johan Trujillo,Stivel275@gmail.com,4,true,2026-01-02 17:47:30.724394+00,
+948683bd-f69b-4db5-ae36-cae0bfaf5d54,super-1,spuer-1@gmail.com,5,true,2026-01-17 04:44:26.663059+00,
+ec92966e-457b-4bfa-8df8-bda1542f37fd,JT,johan.trujillo@dico.com.co,7,true,2026-01-17 02:12:19.151197+00,4ba94d25-17e8-4957-b3d9-216075f5922d

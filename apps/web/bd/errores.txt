@@ -1,0 +1,36 @@
+Console Error
+
+
+❌ Error en get_organizaciones_dashboard_final: {}
+Call Stack
+4
+
+Hide 3 ignore-listed frame(s)
+createConsoleError
+node_modules/next/src/next-devtools/shared/console-error.ts (16:35)
+handleConsoleError
+node_modules/next/src/next-devtools/userspace/app/errors/use-error-handler.ts (31:31)
+console.error
+node_modules/next/src/next-devtools/userspace/app/errors/intercept-console-error.ts (33:27)
+queryFn
+file:///D:/Replanteo_app/apps/web/.next/dev/static/chunks/src_bb7201b3._.js (66:29)
+
+
+
+forward-logs-shared.ts:95 [HMR] connected
+forward-logs-shared.ts:95 📊 Estado organizaciones: ObjectdataLength: undefinederror: nullisLoading: true[[Prototype]]: Objectconstructor: ƒ Object()hasOwnProperty: ƒ hasOwnProperty()isPrototypeOf: ƒ isPrototypeOf()propertyIsEnumerable: ƒ propertyIsEnumerable()toLocaleString: ƒ toLocaleString()toString: ƒ toString()valueOf: ƒ valueOf()__defineGetter__: ƒ __defineGetter__()__defineSetter__: ƒ __defineSetter__()__lookupGetter__: ƒ __lookupGetter__()__lookupSetter__: ƒ __lookupSetter__()__proto__: (...)get __proto__: ƒ __proto__()set __proto__: ƒ __proto__()
+forward-logs-shared.ts:95 📊 Estado organizaciones: ObjectdataLength: undefinederror: nullisLoading: true[[Prototype]]: Objectconstructor: ƒ Object()hasOwnProperty: ƒ hasOwnProperty()isPrototypeOf: ƒ isPrototypeOf()propertyIsEnumerable: ƒ propertyIsEnumerable()toLocaleString: ƒ toLocaleString()toString: ƒ toString()valueOf: ƒ valueOf()__defineGetter__: ƒ __defineGetter__()__defineSetter__: ƒ __defineSetter__()__lookupGetter__: ƒ __lookupGetter__()__lookupSetter__: ƒ __lookupSetter__()__proto__: (...)get __proto__: ƒ __proto__()set __proto__: ƒ __proto__()
+forward-logs-shared.ts:95 🔍 Ejecutando get_organizaciones_dashboard_final...
+icjcuoenbgzqhfmcbato.supabase.co/rest/v1/rpc/get_organizaciones_dashboard_final:1  Failed to load resource: the server responded with a status of 400 ()
+installHook.js:1 ❌ Error en get_organizaciones_dashboard_final: Object
+overrideMethod @ installHook.js:1
+forward-logs-shared.ts:95 🔍 Ejecutando get_organizaciones_dashboard_final...
+icjcuoenbgzqhfmcbato.supabase.co/rest/v1/rpc/get_organizaciones_dashboard_final:1  Failed to load resource: the server responded with a status of 400 ()
+installHook.js:1 ❌ Error en get_organizaciones_dashboard_final: Object
+overrideMethod @ installHook.js:1
+forward-logs-shared.ts:95 🔍 Ejecutando get_organizaciones_dashboard_final...
+icjcuoenbgzqhfmcbato.supabase.co/rest/v1/rpc/get_organizaciones_dashboard_final:1  Failed to load resource: the server responded with a status of 400 ()
+installHook.js:1 ❌ Error en get_organizaciones_dashboard_final: Object
+overrideMethod @ installHook.js:1
+forward-logs-shared.ts:95 📊 Estado organizaciones: ObjectdataLength: undefinederror: code: "42804"details: "Returned type bigint does not match expected type integer in column 5."hint: nullmessage: "structure of query does not match function result type"[[Prototype]]: ObjectisLoading: false[[Prototype]]: Object
+forward-logs-shared.ts:95 📊 Estado organizaciones: ObjectdataLength: undefinederror: code: "42804"details: "Returned type bigint does not match expected type integer in column 5."hint: nullmessage: "structure of query does not match function result type"[[Prototype]]: ObjectisLoading: false[[Prototype]]: Object

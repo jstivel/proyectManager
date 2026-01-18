@@ -1,28 +1,11 @@
-import { createClient } from '@/utils/supabase/server'
-import { Building2, Users, Activity, ShieldAlert, BarChart3, ArrowUpRight } from 'lucide-react'
+import { Building2, Users, Activity, ShieldAlert, BarChart3, ArrowUpRight, Power, PowerOff } from 'lucide-react'
 import Link from 'next/link'
 import { StatCard } from './StatCard'
+import { getAdminTelemetry } from '@/services/admin'
 
 export async function AdminDashboard() {
-  const supabase = await createClient()
-
-  /**
-   * REFACTORIZACIÓN DE SEGURIDAD:
-   * Consultamos el RPC centralizado para estadísticas globales.
-   */
-  const { data: telemetry, error } = await supabase.rpc('get_admin_full_telemetry');
-
-  // Desestructuramos asegurando que si el RPC devuelve 'global' o el objeto directo, funcione.
-  const stats = telemetry?.global || telemetry || {
-    total_organizaciones: 0,
-    total_usuarios: 0,
-    total_proyectos: 0,
-    server_load: 0
-  };
-  
-  if (error) {
-    console.error('Error cargando stats del dashboard:', error.message)
-  }
+  // Centralizamos la obtención de datos en el servicio (Capa de Auditoría)
+  const stats = await getAdminTelemetry()
 
   return (
     <div className="space-y-10">
@@ -59,14 +42,13 @@ export async function AdminDashboard() {
 
       {/* Grid de Métricas Principales */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-        {/* Enlace corregido a organizaciones */}
         <Link 
           href="/dashboard/organizaciones" 
           className="group block transition-all hover:-translate-y-1 active:scale-95"
         >
           <StatCard 
             title="Organizaciones" 
-            value={stats.total_organizaciones} 
+            value={stats.total_organizaciones || 0} 
             icon={<Building2 size={24} />} 
             color="bg-blue-600" 
             description="Entidades registradas"
@@ -78,8 +60,8 @@ export async function AdminDashboard() {
           className="group block transition-all hover:-translate-y-1 active:scale-95"
         >
           <StatCard 
-            title="Usuarios Totales" 
-            value={stats.total_usuarios} 
+            title="Usuarios Activos" 
+            value={stats.total_usuarios || 0} 
             icon={<Users size={24} />} 
             color="bg-indigo-600" 
             description="Personal activo en campo"
@@ -110,9 +92,9 @@ export async function AdminDashboard() {
                 <p className="text-xs text-slate-400 font-medium">Eventos registrados en las últimas 24h</p>
               </div>
             </div>
-            <button className="text-[10px] font-black uppercase text-blue-600 hover:bg-blue-50 px-4 py-2 rounded-xl transition-colors">
-              Ver Logs Completos
-            </button>
+            <Link href="/dashboard/usuarios" className="text-[10px] font-black uppercase text-blue-600 hover:bg-blue-50 px-4 py-2 rounded-xl transition-colors">
+              Gestionar Estados
+            </Link>
           </div>
 
           <div className="flex-1 flex flex-col items-center justify-center text-center space-y-4">
@@ -122,7 +104,7 @@ export async function AdminDashboard() {
             <div className="max-w-xs">
               <h4 className="font-bold text-slate-800 mb-1 italic">Sincronizando flujos...</h4>
               <p className="text-slate-400 text-xs leading-relaxed font-medium">
-                La telemetría de las organizaciones aparecerá aquí una vez que los PM inicien el despliegue de capas.
+                La telemetría permite al administrador activar o revocar accesos instantáneamente desde la gestión de personal.
               </p>
             </div>
           </div>
@@ -147,18 +129,18 @@ export async function AdminDashboard() {
             <div className="h-px bg-slate-800 w-full" />
 
             <div className="space-y-2">
-              <p className="text-[10px] font-black text-slate-500 uppercase">Acceso RLS</p>
+              <p className="text-[10px] font-black text-slate-500 uppercase">Control de Acceso</p>
               <div className="flex items-center justify-between">
-                <span className="text-sm font-bold">Políticas Activas</span>
-                <span className="text-[10px] bg-blue-500/20 text-blue-400 px-2 py-0.5 rounded font-black">FIREWALL ON</span>
+                <span className="text-sm font-bold">Soft Delete Activo</span>
+                <span className="text-[10px] bg-blue-500/20 text-blue-400 px-2 py-0.5 rounded font-black">AUDIT ON</span>
               </div>
             </div>
           </div>
 
-          <button className="mt-8 w-full bg-white/10 hover:bg-white/20 py-4 rounded-2xl flex items-center justify-center gap-3 transition-all group">
+          <Link href="/dashboard/configuracion" className="mt-8 w-full bg-white/10 hover:bg-white/20 py-4 rounded-2xl flex items-center justify-center gap-3 transition-all group">
             <span className="text-[10px] font-black uppercase tracking-widest">Configuración Core</span>
             <ArrowUpRight size={14} className="group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform" />
-          </button>
+          </Link>
         </div>
       </div>
     </div>

@@ -11,37 +11,47 @@ import {
   HardHat, 
   Loader2,
   Mail,
-  Fingerprint
+  Fingerprint,
+  Power,
+  PowerOff
 } from 'lucide-react'
 import UsuarioModal from '@/components/modal/UsuarioModal'
-// Importamos el hook que centraliza la lógica y el estado
 import { useUsuarios } from '@/hooks/useUsuarios'
 
 export default function UsuariosPage() {
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [selectedUser, setSelectedUser] = useState<any>(null)
   
-  // 1. Conectamos con el hook (Elimina el uso manual de supabase y useEffect)
-  const { usuarios, isLoading, deleteMutation } = useUsuarios()
+  // Conectamos con el hook que ahora incluye toggleStatusMutation
+  const { usuarios, isLoading, deleteMutation, toggleStatusMutation } = useUsuarios()
 
   /**
-   * Eliminación de Usuario:
-   * Ahora usamos la mutación del hook que ya maneja los Toasts y la actualización de caché.
+   * Eliminación de Usuario (Soft Delete)
    */
   const handleDelete = async (id: string, nombre: string) => {
     if (!confirm(`¿Estás seguro de eliminar a ${nombre}? Esta acción revocará todos sus accesos de inmediato.`)) return
-    
     deleteMutation.mutate(id)
   }
 
-  const getRoleIcon = (rolId: number) => {
+  /**
+   * Cambio de Estado (Activar/Desactivar)
+   */
+  const handleToggleStatus = (id: string, currentStatus: boolean) => {
+    toggleStatusMutation.mutate({ id, activo: !currentStatus })
+  }
+
+  const getRoleIcon = (rolId: number, rolNombre?: string) => {
     switch (rolId) {
-      case 4: // Administrador Global (Actualizado según tus roles previos)
+      case 4: // Administrador Global
         return <ShieldCheck className="text-indigo-600" size={18} />
       case 7: // Project Manager
         return <UserCog className="text-blue-600" size={18} />
-      default: // Personal de Campo / Operativo
+      case 5: // Supervisor
+        return <ShieldCheck className="text-emerald-600" size={18} />
+      case 6: // Técnico
         return <HardHat className="text-amber-600" size={18} />
+      default:
+        return <HardHat className="text-slate-600" size={18} />
     }
   }
 
@@ -95,15 +105,26 @@ export default function UsuariosPage() {
                   </tr>
                 ) : (
                   usuarios.map((u: any) => (
-                    <tr key={u.id} className="hover:bg-slate-50/50 transition-all group">
+                    <tr 
+                      key={u.id} 
+                      className={`transition-all group ${!u.activo ? 'bg-slate-50/40 opacity-70' : 'hover:bg-slate-50/50'}`}
+                    >
                       <td className="p-6">
                         <div className="flex items-center gap-4">
-                          <div className="w-10 h-10 bg-slate-100 rounded-xl flex items-center justify-center text-slate-400 group-hover:bg-blue-600 group-hover:text-white transition-all font-black uppercase text-xs">
+                          <div className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all font-black uppercase text-xs ${
+                            u.activo 
+                            ? 'bg-slate-100 text-slate-400 group-hover:bg-blue-600 group-hover:text-white' 
+                            : 'bg-slate-200 text-slate-500'
+                          }`}>
                             {u.nombre?.substring(0, 2)}
                           </div>
                           <div>
-                            <div className="font-black text-slate-900 group-hover:text-blue-600 transition-colors">{u.nombre}</div>
-                            <div className="text-[10px] text-slate-400 font-mono font-bold uppercase tracking-tighter md:hidden">{u.email}</div>
+                            <div className={`font-black transition-colors ${u.activo ? 'text-slate-900 group-hover:text-blue-600' : 'text-slate-500 line-through'}`}>
+                              {u.nombre}
+                            </div>
+                            <div className="text-[10px] text-slate-400 font-mono font-bold uppercase tracking-tighter md:hidden">
+                              {u.email}
+                            </div>
                           </div>
                         </div>
                       </td>
@@ -115,14 +136,31 @@ export default function UsuariosPage() {
                       </td>
                       <td className="p-6">
                         <div className="inline-flex items-center gap-2.5 bg-slate-100 px-4 py-1.5 rounded-full border border-slate-200/50">
-                          {getRoleIcon(u.rol_id)}
+                          {getRoleIcon(u.rol_id, u.rol_nombre)}
                           <span className="text-[10px] font-black uppercase tracking-widest text-slate-600">
-                            {u.roles?.nombre || 'Sin Rol'} 
+                            {u.rol_nombre || 'Sin Rol'} 
                           </span>
                         </div>
                       </td>
                       <td className="p-6 text-right">
-                        <div className="flex justify-end gap-2">
+                        <div className="flex justify-end gap-1">
+                          {/* BOTÓN TOGGLE STATUS (Solo visible si el SuperAdmin ve inactivos o para desactivar) */}
+                          <button
+                            onClick={() => handleToggleStatus(u.id, u.activo)}
+                            disabled={toggleStatusMutation.isPending}
+                            className={`p-3 rounded-xl transition-all ${
+                              u.activo 
+                                ? 'text-slate-400 hover:text-amber-600 hover:bg-white hover:shadow-lg' 
+                                : 'text-blue-600 hover:bg-white hover:shadow-lg'
+                            }`}
+                            title={u.activo ? "Desactivar usuario" : "Activar usuario"}
+                          >
+                            {toggleStatusMutation.isPending && toggleStatusMutation.variables?.id === u.id 
+                              ? <Loader2 className="animate-spin" size={18} /> 
+                              : u.activo ? <Power size={18} /> : <PowerOff size={18} />
+                            }
+                          </button>
+
                           <button
                             onClick={() => {
                               setSelectedUser(u)
@@ -133,6 +171,7 @@ export default function UsuariosPage() {
                           >
                             <Edit size={18} />
                           </button>
+
                           <button 
                             onClick={() => handleDelete(u.id, u.nombre)}
                             className="p-3 text-slate-400 hover:text-red-600 hover:bg-white hover:shadow-lg rounded-xl transition-all"

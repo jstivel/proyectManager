@@ -54,7 +54,8 @@ export default function UsuarioModal({ isOpen, onClose, usuario }: UsuarioModalP
       nombre,
       email,
       rol_id: parseInt(rolId),
-      organizacion_id: usuario?.organizacion_id // Mantener la misma org en edición
+      organizacion_id: usuario?.organizacion_id || 'auto', // Mantener la misma org en edición, 'auto' para nuevos usuarios
+      activo: usuario?.activo ?? true // Mantener el mismo estado, true para nuevos usuarios
     }, {
       onSuccess: () => {
         onClose() // Cerramos solo si la operación fue exitosa
