@@ -1,9 +1,9 @@
 'use client'
 
-import { useEffect, useState } from 'react'
-import { createClient } from '@/utils/supabase/client'
+import { useState, useEffect } from 'react'
+import { useProyectoCapas } from '@/hooks/useProyectoCapas'
 import { Button } from '@/components/ui/button'
-import { Loader2, CheckCircle2, Circle, Download, UploadCloud } from 'lucide-react'
+import { Loader2, CheckCircle2, Circle, Download, UploadCloud, X } from 'lucide-react'
 import { downloadLayerTemplate } from '@/services/templateService'
 import BulkUploadModal from './BulkUploadModal'
 
@@ -15,99 +15,48 @@ interface AsignarCapasModalProps {
 }
 
 export default function AsignarCapasModal({ proyecto, isOpen, onClose, onSuccess }: AsignarCapasModalProps) {
-  const [biblioteca, setBiblioteca] = useState<any[]>([])
-  const [asignadas, setAsignadas] = useState<string[]>([])
-  const [loading, setLoading] = useState(false)
-  const [saving, setSaving] = useState(false)
+  // El hook consume get_proyecto_biblioteca() para lectura segura
+  const { 
+    biblioteca, 
+    asignadasIds, 
+    isLoading, 
+    isSaving, 
+    syncCapas 
+  } = useProyectoCapas(proyecto?.id)
   
-  // Estado para el modal de carga masiva interno
   const [isBulkModalOpen, setIsBulkModalOpen] = useState(false)
   const [selectedCapaForUpload, setSelectedCapaForUpload] = useState<any>(null)
-  
-  const supabase = createClient()
+  const [asignadasLocal, setAsignadasLocal] = useState<string[]>([])
 
+  // Sincroniza la selección local con lo que realmente hay en la DB al abrir/cargar
   useEffect(() => {
-    if (isOpen && proyecto?.id) {
-      const fetchData = async () => {
-        setLoading(true)
-        try {
-          /**
-           * 1. LLAMADA AL PROXY (RPC): Traemos el esquema técnico de todas las capas.
-           * El RPC garantiza que solo vemos capas habilitadas para nuestra organización.
-           */
-          const { data: esquemaData, error: schemaError } = await supabase
-            .rpc('get_infra_schema_dictionary');
-
-          if (schemaError) throw schemaError;
-
-          /**
-           * 2. Traemos las capas ya asignadas al proyecto actual.
-           * Nota: Esta consulta se mantiene simple, pero la persistencia (save) será por RPC.
-           */
-          const { data: asignadasRes, error: asignadasError } = await supabase
-            .from('proyecto_capas')
-            .select('feature_type_id')
-            .eq('proyecto_id', proyecto.id);
-
-          if (asignadasError) throw asignadasError;
-
-          // Mapeamos los datos del RPC para que coincidan con la estructura del componente
-          const biblioFormateada = esquemaData.map((e: any) => ({
-            id: e.f_type_id,
-            nombre: e.nombre_capa,
-            // Guardamos las columnas clave para pasarlas al validador de CSV
-            campos_requeridos: e.columnas_clave || []
-          }));
-
-          setBiblioteca(biblioFormateada);
-          if (asignadasRes) setAsignadas(asignadasRes.map(a => a.feature_type_id));
-
-        } catch (err) {
-          console.error('Error cargando configuración de capas:', err)
-        } finally {
-          setLoading(false)
-        }
-      }
-      fetchData()
+    if (asignadasIds) {
+      setAsignadasLocal(asignadasIds)
     }
-  }, [isOpen, proyecto?.id, supabase])
+  }, [asignadasIds])
 
   const toggleCapa = (id: string) => {
-    setAsignadas(prev =>
+    setAsignadasLocal(prev =>
       prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]
     )
   }
 
-  const handleOpenUpload = (e: React.MouseEvent, capa: any) => {
-    e.stopPropagation(); 
-    setSelectedCapaForUpload(capa);
-    setIsBulkModalOpen(true);
+  const handleGuardar = async () => {
+    try {
+      // Esta llamada activa syncProyectoCapasAction -> RPC sync_proyecto_capas
+      await syncCapas(asignadasLocal)
+      if (onSuccess) onSuccess()
+      onClose()
+    } catch (err) {
+      // El error de "No tienes permisos" definido en el SQL será capturado aquí
+      console.error("Error en la sincronización de capas:", err)
+    }
   }
 
-  /**
-   * REFACTORIZACIÓN RPC:
-   * En lugar de hacer DELETE e INSERT manuales (propenso a errores de carrera),
-   * llamamos a una función atómica que sincroniza las capas en una sola transacción.
-   */
-  async function guardarCambios() {
-    setSaving(true)
-    try {
-      const { error } = await supabase.rpc('sync_proyecto_capas', {
-        p_proyecto_id: proyecto.id,
-        p_feature_type_ids: asignadas
-      });
-
-      if (error) throw error;
-
-      if (onSuccess) onSuccess()
-      else onClose()
-
-    } catch (err: any) {
-      console.error('Error al guardar:', err.message)
-      alert('Error al guardar configuración: ' + err.message)
-    } finally {
-      setSaving(false)
-    }
+  const handleOpenUpload = (e: React.MouseEvent, capa: any) => {
+    e.stopPropagation()
+    setSelectedCapaForUpload(capa)
+    setIsBulkModalOpen(true)
   }
 
   if (!isOpen) return null
@@ -117,39 +66,47 @@ export default function AsignarCapasModal({ proyecto, isOpen, onClose, onSuccess
       <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 text-slate-900">
         <div className="bg-white rounded-[2rem] shadow-2xl max-w-lg w-full overflow-hidden flex flex-col max-h-[85vh] border border-white/20 animate-in fade-in zoom-in duration-200">
           
-          {/* Header con Estilo Pro */}
+          {/* Header con información del proyecto */}
           <div className="p-8 border-b bg-slate-50/50 relative">
+            <button 
+              onClick={onClose} 
+              className="absolute top-8 right-8 text-slate-400 hover:text-slate-600 transition-colors"
+            >
+              <X size={20} />
+            </button>
             <div className="flex items-center gap-2 mb-2">
               <div className="h-2 w-2 bg-blue-500 rounded-full animate-pulse" />
-              <span className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Configuración de Red</span>
+              <span className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Configuración Técnica</span>
             </div>
-            <h2 className="text-2xl font-black text-slate-900 leading-none tracking-tight">Habilitar Capas</h2>
+            <h2 className="text-2xl font-black text-slate-900 leading-none tracking-tight">Capas del Proyecto</h2>
             <p className="text-xs text-blue-600 font-bold mt-2 uppercase tracking-wide">
-              Proyecto: {proyecto?.nombre}
+              {proyecto?.nombre}
             </p>
           </div>
 
-          {/* Listado de Biblioteca Técnica */}
+          {/* Listado de Biblioteca (Filtrado por Organización en SQL) */}
           <div className="p-8 overflow-y-auto space-y-3">
-            {loading ? (
+            {isLoading ? (
               <div className="flex flex-col items-center justify-center py-12 gap-4">
                 <Loader2 className="animate-spin text-blue-600" size={32} />
-                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Cargando Diccionario...</span>
+                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">
+                  Cargando biblioteca de organización...
+                </span>
               </div>
-            ) : (
-              biblioteca.map((capa) => {
-                const isSelected = asignadas.includes(capa.id)
+            ) : biblioteca.length > 0 ? (
+              biblioteca.map((capa: any) => {
+                const isSelected = asignadasLocal.includes(capa.id)
                 return (
                   <div 
-                    key={capa.id}
+                    key={capa.id} 
                     className={`flex items-center justify-between p-2 pr-5 border-2 rounded-[1.25rem] transition-all duration-300 ${
                       isSelected 
                         ? 'border-blue-500 bg-blue-50/30 shadow-md shadow-blue-100' 
                         : 'border-slate-100 opacity-60 hover:opacity-100 hover:border-slate-200'
                     }`}
                   >
-                    <button
-                      onClick={() => toggleCapa(capa.id)}
+                    <button 
+                      onClick={() => toggleCapa(capa.id)} 
                       className="flex items-center gap-4 flex-1 p-3 text-left group"
                     >
                       <div className={`transition-transform duration-200 ${isSelected ? 'scale-110' : 'group-hover:scale-110'}`}>
@@ -171,19 +128,19 @@ export default function AsignarCapasModal({ proyecto, isOpen, onClose, onSuccess
                       </div>
                     </button>
 
-                    {/* BOTONES DE ACCIÓN DINÁMICOS */}
+                    {/* Acciones para capas habilitadas */}
                     {isSelected && (
                       <div className="flex gap-2 animate-in slide-in-from-right-2 duration-300">
                         <button 
-                          onClick={(e) => { e.stopPropagation(); downloadLayerTemplate(capa.id, capa.nombre); }}
-                          className="w-10 h-10 flex items-center justify-center hover:bg-blue-600 hover:text-white rounded-xl text-blue-600 transition-all bg-white border border-blue-100 shadow-sm active:scale-90"
+                          onClick={(e) => { e.stopPropagation(); downloadLayerTemplate(capa.id, capa.nombre); }} 
+                          className="w-10 h-10 flex items-center justify-center hover:bg-blue-600 hover:text-white rounded-xl text-blue-600 border border-blue-100 bg-white shadow-sm active:scale-90 transition-all"
                           title="Descargar Plantilla CSV"
                         >
                           <Download size={18} />
                         </button>
                         <button 
-                          onClick={(e) => handleOpenUpload(e, capa)}
-                          className="w-10 h-10 flex items-center justify-center hover:bg-emerald-600 hover:text-white rounded-xl text-emerald-600 transition-all bg-white border border-emerald-100 shadow-sm active:scale-90"
+                          onClick={(e) => handleOpenUpload(e, capa)} 
+                          className="w-10 h-10 flex items-center justify-center hover:bg-emerald-600 hover:text-white rounded-xl text-emerald-600 border border-emerald-100 bg-white shadow-sm active:scale-90 transition-all"
                           title="Carga Masiva"
                         >
                           <UploadCloud size={18} />
@@ -193,41 +150,47 @@ export default function AsignarCapasModal({ proyecto, isOpen, onClose, onSuccess
                   </div>
                 )
               })
+            ) : (
+              <div className="text-center py-12 border-2 border-dashed border-slate-100 rounded-[2rem]">
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                  No se encontraron tipos de capas para esta organización
+                </p>
+              </div>
             )}
           </div>
 
-          {/* Footer con Acciones de Guardado */}
+          {/* Footer de Acciones (Protección de Rol integrada en isSaving) */}
           <div className="p-8 border-t bg-slate-50/80 flex gap-4">
             <Button 
               variant="ghost" 
               className="flex-1 font-black uppercase text-[10px] tracking-widest text-slate-400 hover:text-slate-600" 
               onClick={onClose} 
-              disabled={saving}
+              disabled={isSaving}
             >
               Cancelar
             </Button>
             <Button 
               className="flex-1 bg-slate-900 hover:bg-blue-600 font-black uppercase text-[10px] tracking-widest text-white py-7 rounded-2xl shadow-xl shadow-slate-200 transition-all active:scale-[0.98]" 
-              onClick={guardarCambios} 
-              disabled={saving || loading}
+              onClick={handleGuardar} 
+              disabled={isSaving || isLoading}
             >
-              {saving ? <Loader2 className="animate-spin mr-3" size={16} /> : null}
-              {saving ? 'Sincronizando...' : 'Guardar Configuración'}
+              {isSaving && <Loader2 className="animate-spin mr-3" size={16} />}
+              {isSaving ? 'Guardando...' : 'Actualizar Configuración'}
             </Button>
           </div>
         </div>
       </div>
 
-      {/* Modal de Carga Masiva (Recibe los datos validados del RPC) */}
+      {/* Modal Secundario para Carga de Datos */}
       {isBulkModalOpen && selectedCapaForUpload && (
-        <BulkUploadModal
-          proyectoId={proyecto.id}
-          capa={selectedCapaForUpload}
-          onClose={() => setIsBulkModalOpen(false)}
-          onSuccess={() => {
-            setIsBulkModalOpen(false);
-            if (onSuccess) onSuccess();
-          }}
+        <BulkUploadModal 
+          proyectoId={proyecto.id} 
+          capa={selectedCapaForUpload} 
+          onClose={() => setIsBulkModalOpen(false)} 
+          onSuccess={() => { 
+            setIsBulkModalOpen(false); 
+            if (onSuccess) onSuccess(); 
+          }} 
         />
       )}
     </>

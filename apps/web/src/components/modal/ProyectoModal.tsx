@@ -1,149 +1,227 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import { createClient } from '@/utils/supabase/client'
+import { useEffect, useState } from 'react'
+import { useProyectos } from '@/hooks/useProyectos'
+import { 
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter 
+} from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
-import { X, Briefcase, MapPin, Building2, UserCircle2, Loader2, AlertCircle } from 'lucide-react'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { 
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue 
+} from '@/components/ui/select'
+import { Loader2, MapPin, Building2, UserCircle2, Save, Globe } from 'lucide-react'
 import { toast } from 'sonner'
-import { useQueryClient } from '@tanstack/react-query'
+
+// Listado de regiones/departamentos de Colombia para el select
+const REGIONES_COLOMBIA = [
+  "Amazonas", "Antioquia", "Arauca", "Atlántico", "Bogotá D.C.", "Bolívar", "Boyacá", 
+  "Caldas", "Caquetá", "Casanare", "Cauca", "Cesar", "Chocó", "Córdoba", "Cundinamarca", 
+  "Guainía", "Guaviare", "Huila", "La Guajira", "Magdalena", "Meta", "Nariño", 
+  "Norte de Santander", "Putumayo", "Quindío", "Risaralda", "San Andrés", "Santander", 
+  "Sucre", "Tolima", "Valle del Cauca", "Vaupés", "Vichada"
+].sort()
 
 interface ProyectoModalProps {
-  proyecto?: any; 
-  isOpen: boolean;
-  onClose: () => void;
+  isOpen: boolean
+  onClose: () => void
+  onSuccess?: () => void
+  proyecto?: any 
+  supervisores: any[]
 }
 
-export default function ProyectoModal({ proyecto, isOpen, onClose }: ProyectoModalProps) {
-  const [loading, setLoading] = useState(false)
-  const [userRol, setUserRol] = useState<number | null>(null)
-  const [supervisores, setSupervisores] = useState<any[]>([])
+export default function ProyectoModal({ 
+  isOpen, 
+  onClose, 
+  proyecto, 
+  supervisores, 
+  onSuccess 
+}: ProyectoModalProps) {
+  
+  const { saveProyecto, isSaving } = useProyectos()
   
   const [formData, setFormData] = useState({
     nombre: '',
     entidad: '',
     region: '',
     supervisor_id: '',
-    estado: 'activo'
+    fase_actual: 'replanteo'
   })
 
-  const supabase = createClient()
-  const queryClient = useQueryClient()
-
+  // Sincronizar estado cuando se abre el modal o cambia el proyecto seleccionado
   useEffect(() => {
-    async function loadContext() {
-      if (!isOpen) return
-      
-      // Obtener el rol del usuario actual
-      const { data: { user } } = await supabase.auth.getUser()
-      const { data: perfil } = await supabase.from('perfiles').select('rol_id').eq('id', user?.id).single()
-      setUserRol(perfil?.rol_id || null)
-
-      // Cargar supervisores disponibles
-      const { data: sups } = await supabase.from('perfiles').select('id, nombre').in('rol_id', [2, 3, 7]).order('nombre')
-      if (sups) setSupervisores(sups)
-    }
-    loadContext()
-  }, [isOpen, supabase])
-
-  useEffect(() => {
-    if (isOpen && proyecto) {
-      setFormData({
-        nombre: proyecto.nombre || '',
-        entidad: proyecto.entidad || '',
-        region: proyecto.region || '',
-        supervisor_id: proyecto.supervisor_id || '',
-        estado: proyecto.estado || 'activo'
-      })
-    } else {
-      setFormData({ nombre: '', entidad: '', region: '', supervisor_id: '', estado: 'activo' })
+    if (isOpen) {
+      if (proyecto) {
+        setFormData({
+          nombre: proyecto.nombre || '',
+          entidad: proyecto.entidad || '',
+          region: proyecto.region || '',
+          supervisor_id: proyecto.supervisor_id || '',
+          fase_actual: proyecto.fase_actual || 'replanteo'
+        })
+      } else {
+        setFormData({ 
+          nombre: '', 
+          entidad: '', 
+          region: '', 
+          supervisor_id: '', 
+          fase_actual: 'replanteo' 
+        })
+      }
     }
   }, [proyecto, isOpen])
 
-  if (!isOpen) return null
-
-  // Bloqueo de creación para SuperAdmin
-  const isCreatingAsAdmin = !proyecto && userRol === 4
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (isCreatingAsAdmin) return
+    
+    if (!formData.nombre || !formData.supervisor_id || !formData.region) {
+      return toast.error("Nombre, Región y Supervisor son obligatorios")
+    }
 
-    setLoading(true)
     try {
-      const isEditing = !!proyecto?.id
-      const payload = { ...formData, supervisor_id: formData.supervisor_id || null }
-
-      const { error } = isEditing 
-        ? await supabase.from('proyectos').update(payload).eq('id', proyecto.id)
-        : await supabase.from('proyectos').insert([payload])
-
-      if (error) throw error
-
-      toast.success(isEditing ? 'Cambios guardados' : 'Proyecto lanzado')
-      queryClient.invalidateQueries({ queryKey: ['proyectos'] })
+      await saveProyecto({ ...formData, id: proyecto?.id })
+      toast.success(proyecto ? "Proyecto actualizado" : "Proyecto creado con éxito")
+      if (onSuccess) onSuccess()
       onClose()
-    } catch (err: any) {
-      toast.error(err.message)
-    } finally {
-      setLoading(false)
+    } catch (error: any) {
+      toast.error(error.message || "Error al procesar la solicitud")
     }
   }
 
   return (
-    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md flex items-center justify-center z-[100] p-4">
-      <div className="bg-white rounded-[2.5rem] shadow-2xl max-w-lg w-full overflow-hidden border border-slate-100 animate-in fade-in zoom-in duration-200">
+    <Dialog open={isOpen} onOpenChange={onClose}>
+      <DialogContent className="sm:max-w-[550px] rounded-[2.5rem] border-none shadow-2xl p-0 overflow-hidden bg-white">
+        {/* Decoración visual */}
+        <div className="absolute top-0 right-0 w-40 h-40 bg-blue-600/5 rounded-full -mr-20 -mt-20 blur-3xl pointer-events-none"></div>
         
-        {/* Header */}
-        <div className="px-8 py-6 border-b border-slate-50 flex justify-between items-center bg-slate-50/50">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center text-white shadow-lg shadow-blue-200">
-              <Briefcase size={20} />
+        <form onSubmit={handleSubmit}>
+          <div className="p-8">
+            <DialogHeader className="p-0 mb-8">
+              <DialogTitle className="text-3xl font-black uppercase tracking-tighter italic text-slate-900">
+                {proyecto ? 'Editar' : 'Nuevo'} <span className="text-blue-600">Proyecto</span>
+              </DialogTitle>
+              <DialogDescription className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">
+                Gestión de infraestructura y asignación de personal
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-5">
+              {/* Campo Nombre */}
+              <div className="space-y-2">
+                <Label className="ml-1">Nombre del Proyecto</Label>
+                <div className="relative">
+                  <MapPin className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                  <Input 
+                    value={formData.nombre}
+                    onChange={(e) => setFormData({...formData, nombre: e.target.value})}
+                    placeholder="Ej: Red Dorsal Tramo 04" 
+                    className="pl-12 font-bold"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                {/* Campo Entidad */}
+                <div className="space-y-2">
+                  <Label className="ml-1">Entidad / Cliente</Label>
+                  <div className="relative">
+                    <Building2 className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                    <Input 
+                      value={formData.entidad}
+                      onChange={(e) => setFormData({...formData, entidad: e.target.value})}
+                      placeholder="Empresa Contratante" 
+                      className="pl-12 font-bold"
+                    />
+                  </div>
+                </div>
+
+                {/* Campo Región (Select de Ciudades/Departamentos) */}
+                <div className="space-y-2">
+                  <Label className="ml-1">Región / Departamento</Label>
+                  <Select 
+                    value={formData.region} 
+                    onValueChange={(val) => setFormData({...formData, region: val})}
+                  >
+                    <SelectTrigger className="font-bold">
+                      <div className="flex items-center gap-2 truncate">
+                        <Globe size={16} className="text-blue-500" />
+                        <SelectValue placeholder="Seleccionar" />
+                      </div>
+                    </SelectTrigger>
+                    <SelectContent className="max-h-[200px]">
+                      {REGIONES_COLOMBIA.map((reg) => (
+                        <SelectItem key={reg} value={reg} className="font-bold">
+                          {reg}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              {/* Campo Supervisor (Select Dinámico) */}
+              <div className="space-y-2">
+                <Label className="ml-1">Supervisor Responsable</Label>
+                <Select 
+                  value={formData.supervisor_id} 
+                  onValueChange={(val) => setFormData({...formData, supervisor_id: val})}
+                >
+                  <SelectTrigger className="font-bold h-16">
+                    <div className="flex items-center gap-3 text-left">
+                      <UserCircle2 size={24} className="text-blue-500 shrink-0" />
+                      <div className="flex flex-col">
+                        <SelectValue placeholder="Seleccionar un supervisor de la lista" />
+                      </div>
+                    </div>
+                  </SelectTrigger>
+                  <SelectContent className="max-h-[250px] rounded-2xl shadow-2xl">
+                    {supervisores && supervisores.length > 0 ? (
+                      supervisores.map((s) => (
+                        <SelectItem key={s.id} value={s.id} className="py-3">
+                          <div className="flex flex-col">
+                            <span className="font-bold text-slate-900">{s.nombre}</span>
+                            <span className="text-[10px] text-slate-400 font-medium lowercase italic">
+                              {s.email}
+                            </span>
+                          </div>
+                        </SelectItem>
+                      ))
+                    ) : (
+                      <div className="p-4 text-center text-xs text-slate-400 font-bold uppercase tracking-widest">
+                        No hay supervisores disponibles
+                      </div>
+                    )}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
-            <h2 className="text-xl font-black text-slate-900 uppercase">{proyecto ? 'Editar Proyecto' : 'Nuevo Proyecto'}</h2>
           </div>
-          <button onClick={onClose} className="p-2 text-slate-400"><X size={20} /></button>
-        </div>
-        
-        {isCreatingAsAdmin ? (
-          <div className="p-12 text-center space-y-4">
-            <div className="w-16 h-16 bg-amber-50 rounded-full flex items-center justify-center mx-auto text-amber-500">
-              <AlertCircle size={32} />
-            </div>
-            <p className="text-slate-600 font-bold">Como Superusuario no puedes crear proyectos.</p>
-            <p className="text-sm text-slate-400">Esta función está reservada para los Project Managers de cada organización.</p>
-            <Button onClick={onClose} className="w-full mt-4 bg-slate-100 text-slate-900 hover:bg-slate-200 rounded-2xl py-6">Entendido</Button>
-          </div>
-        ) : (
-          <form onSubmit={handleSubmit} className="p-8 space-y-5">
-            <div className="space-y-1.5">
-              <label className="text-[11px] font-black text-slate-400 uppercase tracking-wider ml-1">Nombre</label>
-              <input required className="w-full px-4 py-3.5 bg-slate-50 border border-slate-100 rounded-2xl outline-none font-bold" value={formData.nombre} onChange={e => setFormData({...formData, nombre: e.target.value})} />
-            </div>
 
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-1.5"><label className="text-[11px] font-black text-slate-400 uppercase tracking-wider ml-1">Entidad</label>
-              <input className="w-full px-4 py-3.5 bg-slate-50 border border-slate-100 rounded-2xl outline-none font-bold" value={formData.entidad} onChange={e => setFormData({...formData, entidad: e.target.value})} /></div>
-              <div className="space-y-1.5"><label className="text-[11px] font-black text-slate-400 uppercase tracking-wider ml-1">Región</label>
-              <input className="w-full px-4 py-3.5 bg-slate-50 border border-slate-100 rounded-2xl outline-none font-bold" value={formData.region} onChange={e => setFormData({...formData, region: e.target.value})} /></div>
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="text-[11px] font-black text-slate-400 uppercase tracking-wider ml-1">Supervisor</label>
-              <select className="w-full px-4 py-3.5 bg-slate-50 border border-slate-100 rounded-2xl outline-none font-bold appearance-none" value={formData.supervisor_id} onChange={e => setFormData({...formData, supervisor_id: e.target.value})}>
-                <option value="">Sin supervisor</option>
-                {supervisores.map(s => <option key={s.id} value={s.id}>{s.nombre}</option>)}
-              </select>
-            </div>
-
-            <div className="flex gap-3 pt-6">
-              <Button type="button" variant="ghost" className="flex-1 py-7 rounded-2xl font-bold" onClick={onClose}>Cancelar</Button>
-              <Button type="submit" className="flex-[1.5] bg-slate-900 hover:bg-blue-600 text-white font-black py-7 rounded-2xl" disabled={loading}>
-                {loading ? <Loader2 className="animate-spin" size={20} /> : <span className="uppercase text-[11px] tracking-widest">{proyecto ? 'Actualizar' : 'Crear'}</span>}
-              </Button>
-            </div>
-          </form>
-        )}
-      </div>
-    </div>
+          <DialogFooter className="bg-slate-50 p-8 pt-6 border-t border-slate-100">
+            <Button 
+              type="button" 
+              variant="ghost" 
+              onClick={onClose}
+              className="rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-200"
+            >
+              Cancelar
+            </Button>
+            <Button 
+              type="submit" 
+              disabled={isSaving}
+              className="bg-slate-900 hover:bg-blue-600 text-white rounded-2xl px-10 py-6 font-black text-[10px] uppercase tracking-[0.2em] shadow-xl transition-all gap-2"
+            >
+              {isSaving ? (
+                <Loader2 className="animate-spin" size={16} />
+              ) : (
+                <Save size={16} />
+              )}
+              {proyecto ? 'Guardar Cambios' : 'Crear Proyecto Nuevo'}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   )
 }

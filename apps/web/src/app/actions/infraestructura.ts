@@ -1,154 +1,136 @@
 'use server'
 
-import { createClient } from '@supabase/supabase-js'
+import { createClient } from "@/utils/supabase/server";
 import { revalidatePath } from 'next/cache'
-import { validateAndFormatInfrastructure, isValidUUID } from '@/utils/security'
-
-// Service Role: Crucial para validaciones espaciales y triggers complejos
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-)
 
 /**
- * GUARDAR INFRAESTRUCTURA (CREAR O EDITAR) - VERSIÓN MEJORADA
- * Centraliza la lógica de puntos (Postes, Cámaras, etc.) con validación PostGIS.
+ * Guarda o Actualiza una infraestructura (Punto en el mapa)
+ * Mantiene compatibilidad con JSONB para atributos dinámicos
  */
-export async function saveInfraestructura(payload: {
-  proyectoId: string,
-  featureTypeId: string,
-  latitud: number,
-  longitud: number,
-  atributos: Record<string, any>,
-  idEdicion?: string 
-}) {
+export async function saveInfraestructura(payload: any) {
+  // Uso correcto de tu función asíncrona de servidor
+  const supabase = await createClient();
+
   try {
-    // 0. Validación estricta de inputs usando utilidades de seguridad
-    const validation = validateAndFormatInfrastructure(payload);
-    if (!validation.isValid) {
-      return { error: `Validación fallida: ${validation.errors.join(', ')}` };
+    // 1. Verificación de sesión
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError || !user) throw new Error('Sesión no válida o expirada');
+
+    // 2. Validación estricta de Roles (PM y Administrador)
+    const { data: usuario } = await supabase
+      .from('usuarios')
+      .select('rol')
+      .eq('id', user.id)
+      .single();
+
+    const rolesPermitidos = ['Project Manager', 'Administrador Global'];
+    if (!usuario || !rolesPermitidos.includes(usuario.rol)) {
+      throw new Error('Acceso denegado: Se requieren permisos de Project Manager o Administrador.');
     }
 
-    // 1. Usar datos sanitizados
-    const sanitized = validation.sanitized;
-    
-    // 2. Conversión a WKT para que PostGIS lo entienda como GEOMETRY
-    const wktGeom = `POINT(${sanitized.longitud} ${sanitized.latitud})`;
+    const { 
+      id, 
+      proyectoId, 
+      capaId, 
+      coordenadas, 
+      atributos, 
+      estado, 
+      id_tecnico 
+    } = payload;
 
-    // 3. Llamada al RPC maestro de infraestructura (versión segura)
-    const { data: result, error: rpcError } = await supabaseAdmin.rpc(
-      'guardar_infraestructura_completa_segura',
-      {
-        p_proyecto_id: sanitized.proyectoId,
-        p_feature_type_id: sanitized.featureTypeId,
-        p_geom: wktGeom,
-        p_atributos: sanitized.atributos,
-        p_id_edicion: sanitized.idEdicion
-      }
-    );
+    // 3. Preparación de Geometría PostGIS (WKT)
+    // Coordenadas deben venir como { lng: number, lat: number }
+    const pointWKT = `POINT(${coordenadas.lng} ${coordenadas.lat})`;
 
-    if (rpcError) {
-      console.error("Error RPC en saveInfraestructura:", rpcError);
-      return { error: "Error en la operación de base de datos" };
+    const datosBase = {
+      proyecto_id: proyectoId,
+      feature_type_id: capaId,
+      geom: pointWKT,
+      atributos: atributos || {}, // Objeto JSONB
+      estado: estado || 'preliminar',
+      id_tecnico: id_tecnico || null,
+      updated_at: new Date().toISOString(),
+    };
+
+    let response;
+
+    if (id) {
+      // MODO EDICIÓN
+      response = await supabase
+        .from('infraestructuras')
+        .update(datosBase)
+        .eq('id', id)
+        .select();
+    } else {
+      // MODO CREACIÓN
+      response = await supabase
+        .from('infraestructuras')
+        .insert([{ 
+          ...datosBase, 
+          creado_por: user.id 
+        }])
+        .select();
     }
 
-    // 5. Revalidación de caché de Next.js
-    revalidatePath('/dashboard/mapa');
-    revalidatePath(`/dashboard/proyectos/${payload.proyectoId}`);
+    if (response.error) {
+      console.error("Error Supabase:", response.error);
+      throw new Error(response.error.message);
+    }
+
+    // Limpiar caché del path del proyecto para ver reflejados los cambios
+    revalidatePath(`/proyectos/${proyectoId}`);
 
     return { 
       success: true, 
-      data: result 
+      data: response.data[0] 
     };
 
   } catch (error: any) {
-    console.error("Error en saveInfraestructura:", error.message);
-    
-    // No exponer detalles de errores internos en producción
-    if (process.env.NODE_ENV === 'production') {
-      return { error: "Error al procesar la solicitud" };
-    }
-    
-    return { error: error.message || "Error al procesar los datos geográficos" };
+    console.error('Error en Action saveInfraestructura:', error.message);
+    return { 
+      success: false, 
+      error: error.message 
+    };
   }
 }
 
 /**
- * ELIMINAR ELEMENTO DE INFRAESTRUCTURA - VERSIÓN MEJORADA
+ * Elimina un elemento de infraestructura
+ * Solo permitido para roles de gestión
  */
-export async function deleteInfraestructura(featureId: string, proyectoId: string) {
+export async function deleteInfraestructura(id: string, proyectoId: string) {
+  const supabase = await createClient();
+
   try {
-    // Validación de UUID
-    if (!isValidUUID(featureId)) {
-      return { error: "ID de feature inválido" };
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) throw new Error('No autorizado');
+
+    const { data: usuario } = await supabase
+      .from('usuarios')
+      .select('rol')
+      .eq('id', user.id)
+      .single();
+
+    if (!usuario || !['Project Manager', 'Administrador Global'].includes(usuario.rol)) {
+      throw new Error('No tienes permisos para eliminar elementos de este proyecto.');
     }
 
-    // Usar función RPC segura con auditoría
-    const { data: result, error } = await supabaseAdmin.rpc('fn_feature_delete_segura', {
-      p_feature_id: featureId
-    });
+    const { error } = await supabase
+      .from('infraestructuras')
+      .delete()
+      .eq('id', id)
+      .eq('proyecto_id', proyectoId);
 
-    if (error) {
-      console.error("Error RPC en deleteInfraestructura:", error);
-      return { error: "Error al eliminar el elemento" };
-    }
+    if (error) throw error;
 
-    // Verificar que la operación fue exitosa
-    if (result && result.success === false) {
-      return { error: result.error || "Error en la operación" };
-    }
+    revalidatePath(`/proyectos/${proyectoId}`);
+    return { success: true };
 
-    revalidatePath('/dashboard/mapa');
-    revalidatePath(`/dashboard/proyectos/${proyectoId}`);
-    
-    return { success: true, auditLog: result?.audit_id };
   } catch (error: any) {
-    console.error("Error en deleteInfraestructura:", error.message);
-    
-    if (process.env.NODE_ENV === 'production') {
-      return { error: "Error al procesar la solicitud" };
-    }
-    
-    return { error: error.message };
-  }
-}
-
-/**
- * OBTENER FOTOS (Vía RPC de seguridad) - VERSIÓN MEJORADA
- */
-export async function getFeaturePhotos(featureId: string) {
-  try {
-    // Validación de UUID
-    if (!isValidUUID(featureId)) {
-      return { error: "ID de feature inválido" };
-    }
-
-    // Usar función RPC segura con validación de paths
-    const { data, error } = await supabaseAdmin.rpc('fn_feature_photos_signed_segura', {
-      p_feature_id: featureId
-    });
-
-    if (error) {
-      console.error("Error RPC en getFeaturePhotos:", error);
-      return { error: "Error al obtener las fotos" };
-    }
-
-    // Validar que los datos devueltos sean seguros
-    const photos = Array.isArray(data) ? data.filter(photo => 
-      photo && 
-      typeof photo.id === 'string' && 
-      typeof photo.signed_url === 'string' &&
-      photo.signed_url.startsWith('https://')
-    ) : [];
-
-    return { success: true, photos };
-  } catch (error: any) {
-    console.error("Error en getFeaturePhotos:", error.message);
-    
-    if (process.env.NODE_ENV === 'production') {
-      return { error: "Error al procesar la solicitud" };
-    }
-    
-    return { error: error.message };
+    console.error('Error en Action deleteInfraestructura:', error.message);
+    return { 
+      success: false, 
+      error: error.message 
+    };
   }
 }

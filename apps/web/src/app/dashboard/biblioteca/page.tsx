@@ -4,25 +4,25 @@ import BibliotecaList from './BibliotecaList'
 export default async function BibliotecaPage() {
   const supabase = await createClient()
 
-  /**
-   * Cambiamos la consulta directa .from('feature_types')
-   * por el RPC get_biblioteca_segura() que ya incluye los atributos.
-   */
+  // Precarga de datos en el servidor
   const { data: capas, error } = await supabase.rpc('get_biblioteca_segura')
 
   if (error) {
-    console.error("Error cargando biblioteca segura:", error.message)
+    console.error("Error inicial biblioteca:", error.message)
   }
 
   return (
-    <div className="max-w-6xl mx-auto p-6">
-      <div className="flex justify-between items-center mb-8">
-        <div>
-          <h1 className="text-3xl font-bold text-slate-900 tracking-tight">Biblioteca Global</h1>
-          <p className="text-slate-500 mt-1">Estructuras base para todos los proyectos de infraestructura.</p>
-        </div>
-      </div>
+    <div className="p-10 max-w-7xl mx-auto animate-in fade-in duration-700">
+      <header className="mb-12">
+        <h1 className="text-4xl font-black uppercase italic tracking-tighter text-slate-900 leading-none">
+          Biblioteca <span className="text-blue-600">Global</span>
+        </h1>
+        <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] mt-3 italic">
+          Diccionario maestro de infraestructura y atributos técnicos
+        </p>
+      </header>
 
+      {/* Pasamos los datos del servidor como initialCapas */}
       <BibliotecaList initialCapas={capas || []} />
     </div>
   )

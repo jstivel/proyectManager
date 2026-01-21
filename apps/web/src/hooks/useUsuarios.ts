@@ -49,7 +49,7 @@ export function useUsuarios() {
           created_at: user.created_at
         }))
       } catch (error) {
-        console.error('❌ Error en get_usuarios_dashboard:', error)
+        console.error('❌ Error en get_usuarios:', error)
         throw error
       }
     }

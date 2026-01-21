@@ -14,7 +14,7 @@ export function useOrganizaciones() {
    * Llama a la RPC 'get_organizaciones_detalladas' que debe devolver:
    * id, nombre, nit, plan_nombre, activo, pm_nombre, total_proyectos, total_usuarios
    */
-  const { data: organizaciones, isLoading, error } = useQuery({
+  const { data: organizaciones, isLoading, error, refetch } = useQuery({
     queryKey: ['organizaciones_dashboard'],
     queryFn: async () => {
       // Invocación a la RPC unificada
@@ -22,13 +22,10 @@ export function useOrganizaciones() {
       
       if (error) {
         // Accedemos a las propiedades internas del error de Supabase
-        console.error('❌ Error detallado:', {
-          code: error.code,
-          message: error.message,
-          details: error.details,
-          hint: error.hint
-        })
-        throw new Error(error.message || 'Error desconocido al obtener organizaciones')
+        if (error.message) {
+          console.error('❌ Error en RPC:', error.message);
+        }
+        throw error;
       }
       
       // Procesamiento de datos: Aseguramos que los conteos sean números (JS maneja bigint como string/objeto a veces)
@@ -37,7 +34,10 @@ export function useOrganizaciones() {
         total_usuarios: Number(org.total_usuarios || 0),
         total_proyectos: Number(org.total_proyectos || 0)
       })) || []
-    }
+    },
+    staleTime: 1000 * 60 * 5, // Considerar datos frescos por 1 minuto
+    refetchOnWindowFocus: true, // REAVELL: Esto hará que si cambias de pestaña y vuelves, se actualice solo
+    retry: 1
   })
 
   /**
@@ -68,7 +68,17 @@ export function useOrganizaciones() {
   const toggleStatusMutation = useMutation({
     mutationFn: ({ id, activo }: { id: string; activo: boolean }) => 
       adminUpdateOrgStatus(id, activo),
-    onSuccess: (res) => {
+    onSuccess: async (res) => {
+      if (res.success) {
+        toast.success('Estado actualizado');
+        // FORZAR RECARGA TOTAL DE LA CACHÉ
+        await queryClient.invalidateQueries({ 
+          queryKey: ['organizaciones_dashboard'],
+          exact: true 
+        });
+      } else {
+        toast.error(res.error);
+      }
       if (res.error) {
         toast.error(res.error)
       } else {

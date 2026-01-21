@@ -5,17 +5,22 @@ import Header from "@/components/layout/Header";
 import { ShieldAlert, LogOut, RefreshCw } from "lucide-react"; 
 import { logoutAction } from "@/app/login/actions";
 import { User, UserProfile } from "@/types";
+import SessionWatcher from "@/components/auth/SessionWatcher";
 
+/**
+ * Verifica si el usuario tiene privilegios de Super Administrador
+ * Se utilizan múltiples capas de validación para mayor robustez
+ */
 function checkIsSuperAdmin(user: User | null, perfil: UserProfile | null): boolean {
   if (!user) return false;
   
-  // Verificar por rol_id (método principal)
+  // 1. Prioridad: Verificar por rol_id en la tabla de perfiles (Rol 4 = SuperAdmin)
   if (perfil?.rol_id === 4) return true;
   
-  // Verificar por metadata (fallback)
+  // 2. Fallback: Verificar metadata del usuario en Auth
   if (user.user_metadata?.super_admin === true) return true;
   
-  // Verificar por email específico (temporal, para migración)
+  // 3. Temporal: Lista blanca de emails para asegurar acceso durante migración
   const adminEmails = ['stivel275@gmail.com', 'admin@replanteo.com'];
   return adminEmails.includes(user.email || '');
 }
@@ -23,7 +28,7 @@ function checkIsSuperAdmin(user: User | null, perfil: UserProfile | null): boole
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const supabase = await createClient();
 
-  // 1. Verificación de sesión (Auth)
+  // 1. Verificación de sesión activa (Auth)
   const { data: { user } } = await supabase.auth.getUser();
 
   if (!user) {
@@ -31,22 +36,21 @@ export default async function DashboardLayout({ children }: { children: React.Re
   }
 
   /**
-   * 2. Obtención de perfil usando RPC
+   * 2. Obtención del perfil detallado mediante RPC segura
    */
-  const { data: perfiles, error } = await supabase.rpc('get_mi_perfil_seguro');
+  const { data: perfiles, error: profileError } = await supabase.rpc('get_mi_perfil_seguro');
   
   const perfil = perfiles && perfiles.length > 0 ? perfiles[0] : null;
 
   /**
-   * 3. Lógica de Bypass y Permisos (Sincronizada con Proxy)
-   * SuperAdmin es Rol 4
+   * 3. Evaluación de permisos
    */
   const isSuperAdmin = checkIsSuperAdmin(user, perfil);
   
   /**
-   * 4. Validación de Acceso
-   * - Si es SuperAdmin, TIENE ACCESO (aunque no tenga organización).
-   * - Si es usuario normal, requiere estar activo y tener organización.
+   * 4. Validación de Acceso (Gatekeeper)
+   * - SuperAdmin: Acceso total garantizado.
+   * - Usuario normal: Debe estar activo y pertenecer a una organización.
    */
   const tieneAcceso = isSuperAdmin || (
     perfil && 
@@ -54,7 +58,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
     perfil.organizacion_id !== null
   );
 
-  // 5. PANTALLA DE ACCESO RESTRINGIDO
+  // 5. Renderizado de interfaz para acceso denegado
   if (!tieneAcceso) {
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6">
@@ -104,18 +108,24 @@ export default async function DashboardLayout({ children }: { children: React.Re
   }
 
   /**
-   * 6. Preparación de datos para la interfaz
+   * 6. Preparación de variables de entorno de UI
    */
   const userRole = perfil?.rol_id || (isSuperAdmin ? 4 : null);
   const nombreOrganizacion = isSuperAdmin ? "ADMINISTRACIÓN GLOBAL" : (perfil?.organizacion_nombre || "Cargando...");
+  
+  // Ofuscamos el email en el Header si es SuperAdmin por seguridad
+  const displayEmail = isSuperAdmin ? `Admin: ${user.email?.split('@')[0]}***` : (user.email || '');
 
   return (
     <div className="flex h-screen bg-slate-100">
+      {/* Client Component que vigila la sesión en tiempo real */}
+      <SessionWatcher />
+      
       <Sidebar userRole={userRole} />
       
       <div className="flex-1 flex flex-col overflow-hidden">
         <Header 
-          email={user.email || ''} 
+          email={displayEmail} 
           organizacion={nombreOrganizacion} 
         />
         
